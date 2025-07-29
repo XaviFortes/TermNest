@@ -1,55 +1,20 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { onMounted } from 'vue'
 import { useSessionsStore } from './stores/sessions'
 import { useSettingsStore } from './stores/settings'
 import SessionManager from './components/SessionManager.vue'
-import SettingsModal from './components/SettingsModal.vue'
 
 const sessionsStore = useSessionsStore()
 const settingsStore = useSettingsStore()
-const showSettingsModal = ref(false)
-
-async function testTauriConnection() {
-  try {
-    console.log('Testing Tauri connection...')
-    const result = await invoke('greet', { name: 'Test' })
-    console.log('Tauri connection test result:', result)
-    alert('Tauri connection working: ' + result)
-  } catch (error) {
-    console.error('Tauri connection test failed:', error)
-    alert('Tauri connection failed: ' + error)
-  }
-}
 
 onMounted(async () => {
-  console.log('App: Mounting application...')
-  try {
-    // Initialize stores
-    console.log('App: Initializing settings store...')
-    await settingsStore.initializeStore()
-    console.log('App: Settings store initialized')
-    
-    console.log('App: Loading sessions...')
-    await sessionsStore.loadSessions()
-    console.log('App: Sessions loaded')
-    
-    // Set up event listeners
-    console.log('App: Setting up event listeners...')
-    sessionsStore.initializeEventListeners()
-    console.log('App: Application fully initialized')
-  } catch (error) {
-    console.error('App: Failed to initialize:', error)
-  }
+  // Initialize stores
+  await settingsStore.initializeStore()
+  await sessionsStore.loadSessions()
+  
+  // Set up event listeners
+  sessionsStore.initializeEventListeners()
 })
-
-function openSettings() {
-  showSettingsModal.value = true
-}
-
-function closeSettings() {
-  showSettingsModal.value = false
-}
 </script>
 
 <template>
@@ -61,10 +26,7 @@ function closeSettings() {
           TermNest
         </h1>
         <div class="header-actions">
-          <button class="btn btn-secondary" @click="testTauriConnection">
-            Test Connection
-          </button>
-          <button class="btn btn-primary" @click="openSettings">
+          <button class="btn btn-primary" @click="() => {}">
             Settings
           </button>
         </div>
@@ -83,12 +45,6 @@ function closeSettings() {
         <span class="version-text">v0.1.0</span>
       </div>
     </footer>
-
-    <!-- Settings Modal -->
-    <SettingsModal
-      v-if="showSettingsModal"
-      @close="closeSettings"
-    />
   </div>
 </template>
 

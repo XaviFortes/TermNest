@@ -44,6 +44,8 @@ const authMethodDisplay = computed(() => {
 async function connect() {
   try {
     await sessionsStore.connectToSession(props.session.id)
+    // Open the session in terminal view
+    sessionsStore.openSession(props.session)
   } catch (error) {
     console.error('Failed to connect:', error)
   }

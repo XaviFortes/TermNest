@@ -31,6 +31,7 @@ export interface ConnectionStatus {
 export const useSessionsStore = defineStore('sessions', () => {
   // State
   const sessions = ref<Session[]>([])
+  const activeSession = ref<Session | null>(null)
   const activeConnections = ref<Map<string, ConnectionStatus>>(new Map())
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -48,11 +49,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     try {
       isLoading.value = true
       error.value = null
+      console.log('Store: Loading sessions...')
       const result = await invoke<Session[]>('list_sessions')
+      console.log('Store: Loaded sessions:', result)
       sessions.value = result
     } catch (err) {
+      console.error('Store: Failed to load sessions:', err)
       error.value = err as string
-      console.error('Failed to load sessions:', err)
     } finally {
       isLoading.value = false
     }
@@ -60,16 +63,32 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function createSession(sessionData: Omit<Session, 'id' | 'created_at'>) {
     try {
+      // Generate a UUID, with fallback for environments where crypto.randomUUID is not available
+      const generateId = () => {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+          return crypto.randomUUID()
+        }
+        // Fallback UUID generation
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0
+          const v = c === 'x' ? r : (r & 0x3 | 0x8)
+          return v.toString(16)
+        })
+      }
+      
       const newSession: Session = {
         ...sessionData,
-        id: crypto.randomUUID(),
+        id: generateId(),
         created_at: new Date().toISOString(),
       }
       
+      console.log('Store: Creating session:', newSession)
       const result = await invoke<Session>('create_session', { session: newSession })
+      console.log('Store: Session created result:', result)
       sessions.value.push(result)
       return result
     } catch (err) {
+      console.error('Store: Failed to create session:', err)
       error.value = err as string
       throw err
     }
@@ -127,6 +146,16 @@ export const useSessionsStore = defineStore('sessions', () => {
     return activeConnections.value.get(sessionId)
   }
 
+  function openSession(session: Session) {
+    console.log('Opening session:', session)
+    activeSession.value = session
+  }
+
+  function closeSession() {
+    console.log('Closing active session')
+    activeSession.value = null
+  }
+
   // Initialize event listeners
   function initializeEventListeners() {
     listen<ConnectionStatus>('connection_status', (event) => {
@@ -137,6 +166,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   return {
     // State
     sessions,
+    activeSession,
     activeConnections,
     isLoading,
     error,
@@ -151,6 +181,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     disconnectSession,
     updateConnectionStatus,
     getConnectionStatus,
+    openSession,
+    closeSession,
     initializeEventListeners,
   }
 })

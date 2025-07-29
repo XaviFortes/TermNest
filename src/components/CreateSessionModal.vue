@@ -70,10 +70,24 @@ async function handleSubmit() {
         : { PublicKey: { key_path: formData.keyPath } }
     }
     
-    await sessionsStore.createSession(sessionData)
+    console.log('Creating session with data:', sessionData)
+    
+    // Add a timeout to prevent hanging
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Session creation timed out')), 10000)
+    })
+    
+    await Promise.race([
+      sessionsStore.createSession(sessionData),
+      timeoutPromise
+    ])
+    
+    console.log('Session created successfully')
     emit('close')
   } catch (error) {
     console.error('Failed to create session:', error)
+    // Show the error to the user
+    errors.value.general = error instanceof Error ? error.message : String(error)
   } finally {
     isSubmitting.value = false
   }
@@ -101,6 +115,12 @@ function handleOverlayClick(event: MouseEvent) {
       </div>
 
       <form @submit.prevent="handleSubmit" class="modal-form">
+        <!-- General Error Display -->
+        <div v-if="errors.general" class="form-error general-error">
+          <span class="error-icon">⚠️</span>
+          {{ errors.general }}
+        </div>
+
         <div class="form-group">
           <label for="name" class="form-label">Session Name</label>
           <input
@@ -355,6 +375,22 @@ function handleOverlayClick(event: MouseEvent) {
   color: var(--text-secondary);
   font-size: 0.75rem;
   margin-top: 0.25rem;
+}
+
+.general-error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fee;
+  color: #c53030;
+  padding: 1rem;
+  border-radius: 0.375rem;
+  border: 1px solid #fed7d7;
+  margin-bottom: 1.5rem;
+}
+
+.error-icon {
+  flex-shrink: 0;
 }
 
 .radio-group {

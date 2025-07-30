@@ -82,8 +82,27 @@ export const useSessionsStore = defineStore('sessions', () => {
         created_at: new Date().toISOString(),
       }
       
+      // Extract password and private_key_path from auth_method
+      let password: string | undefined = undefined
+      let private_key_path: string | undefined = undefined
+      
+      if (sessionData.auth_method === 'Password') {
+        // For password auth, we'll pass undefined - password would need to be collected separately
+        password = undefined
+      } else if (typeof sessionData.auth_method === 'object' && 'PublicKey' in sessionData.auth_method) {
+        private_key_path = sessionData.auth_method.PublicKey.key_path
+      }
+      
       console.log('Store: Creating session:', newSession)
-      const result = await invoke<Session>('create_session', { session: newSession })
+      const result = await invoke<Session>('create_session', {
+        name: newSession.name,
+        host: newSession.host,
+        port: newSession.port,
+        username: newSession.username,
+        password,
+        private_key_path,
+        protocol: newSession.protocol,
+      })
       console.log('Store: Session created result:', result)
       sessions.value.push(result)
       return result
@@ -96,7 +115,19 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function updateSession(session: Session) {
     try {
-      const result = await invoke<Session>('update_session', { session })
+      const result = await invoke<Session>('update_session', {
+        session: {
+          id: session.id,
+          name: session.name,
+          host: session.host,
+          port: session.port,
+          username: session.username,
+          auth_method: session.auth_method,
+          protocol: session.protocol,
+          created_at: session.created_at,
+          last_used: session.last_used,
+        }
+      })
       const index = sessions.value.findIndex(s => s.id === session.id)
       if (index !== -1) {
         sessions.value[index] = result

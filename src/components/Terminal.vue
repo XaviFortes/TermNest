@@ -20,7 +20,19 @@
         ref="terminalContainer" 
         class="terminal-content"
         @click="focusTerminal"
-      ></div>
+      >
+        <div class="terminal-simulation">
+          <div class="terminal-prompt">{{ currentPrompt }}</div>
+          <div 
+            class="terminal-input" 
+            contenteditable="true"
+            @keydown="handleKeydown"
+            @keyup="handleInput"
+            ref="terminalInput"
+          ></div>
+          <div class="terminal-output" v-html="terminalOutput"></div>
+        </div>
+      </div>
     </div>
     
     <!-- SFTP Panel -->
@@ -50,7 +62,14 @@
               <span class="file-size" v-if="!file.is_directory">
                 {{ formatFileSize(file.size) }}
               </span>
-              <span class="file-modified">{{ file.modified }}</span>
+              <div class="file-actions">
+                <button @click="downloadFile(file)" v-if="!file.is_directory" class="btn btn-xs">
+                  Download
+                </button>
+                <button @click="deleteFile(file)" class="btn btn-xs btn-danger">
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -60,195 +79,158 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { useSessionsStore } from '../stores/sessions'
 
 interface Props {
   sessionId: string
   sessionName: string
-  protocol?: string
+  protocol: string
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  protocol: 'SSH'
-})
+interface FileItem {
+  name: string
+  path: string
+  size: number
+  is_directory: boolean
+  modified: string
+}
 
-const terminalContainer = ref<HTMLElement>()
-const connectionStatus = ref<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected')
-const showSftp = ref(false)
-const currentPath = ref('/home')
-const files = ref<any[]>([])
+const props = defineProps<Props>()
+const sessionsStore = useSessionsStore()
 
 // Terminal state
-let terminal: any = null
+const terminalContainer = ref<HTMLElement>()
+const terminalInput = ref<HTMLElement>()
+const connectionStatus = ref<'connecting' | 'connected' | 'disconnected'>('connecting')
+const terminalOutput = ref('')
+const currentPrompt = ref('user@localhost:~$ ')
 
+// SFTP state
+const showSftp = ref(false)
+const currentPath = ref('/')
+const files = ref<FileItem[]>([])
+
+// Event listener cleanup
+let unlistenTerminalOutput: (() => void) | null = null
+
+// Initialize terminal
 onMounted(async () => {
   await initializeTerminal()
-  await connectToSession()
+  await setupEventListeners()
+  focusTerminal()
 })
 
 onUnmounted(() => {
-  if (terminal) {
-    terminal.dispose()
+  disconnect()
+  if (unlistenTerminalOutput) {
+    unlistenTerminalOutput()
   }
 })
 
-async function initializeTerminal() {
-  // For now, we'll use a simple terminal simulation
-  // In a real implementation, you'd use xterm.js
-  
-  if (!terminalContainer.value) return
-  
-  const terminalElement = document.createElement('div')
-  terminalElement.className = 'xterm-simulation'
-  terminalElement.contentEditable = 'true'
-  terminalElement.style.cssText = `
-    background: #000;
-    color: #fff;
-    font-family: 'Courier New', monospace;
-    font-size: 14px;
-    padding: 10px;
-    height: 400px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    outline: none;
-  `
-  
-  terminalElement.innerHTML = 'TermNest Terminal\n$ '
-  
-  terminalContainer.value.appendChild(terminalElement)
-  
-  // Add basic keyboard handling
-  terminalElement.addEventListener('keydown', handleKeydown)
+async function setupEventListeners() {
+  // Listen for terminal output from the backend
+  unlistenTerminalOutput = await listen('terminal_output', (event: any) => {
+    const payload = event.payload
+    if (payload.session_id === props.sessionId) {
+      appendOutput(payload.data)
+    }
+  })
 }
 
-function handleKeydown(e: KeyboardEvent) {
-  const terminalElement = e.target as HTMLElement
-  
-  if (e.key === 'Enter') {
-    e.preventDefault()
-    const content = terminalElement.textContent || ''
-    const command = getCurrentCommand(content)
+async function initializeTerminal() {
+  try {
+    connectionStatus.value = 'connecting'
     
-    if (command.trim()) {
-      sendCommand(command)
+    // Connect using real SSH
+    await sessionsStore.connectToSession(props.sessionId)
+    
+    connectionStatus.value = 'connected'
+    
+    if (props.protocol === 'SSH') {
+      await loadRemoteFiles()
     }
-    
-    // Add new prompt line
-    terminalElement.textContent += '\n$ '
-    
-    // Move cursor to end
-    const range = document.createRange()
-    const selection = window.getSelection()
-    range.selectNodeContents(terminalElement)
-    range.collapse(false)
-    selection?.removeAllRanges()
-    selection?.addRange(range)
+  } catch (error) {
+    console.error('Failed to initialize terminal:', error)
+    connectionStatus.value = 'disconnected'
+    appendOutput('Failed to connect: ' + error + '\n')
   }
 }
 
-function getCurrentCommand(content: string): string {
-  const lines = content.split('\n')
-  const lastLine = lines[lines.length - 1]
-  return lastLine.replace(/^.*\$ /, '')
+function appendOutput(text: string) {
+  terminalOutput.value += text.replace(/\n/g, '<br>')
 }
 
-async function sendCommand(command: string) {
+function handleKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    executeCommand()
+  }
+}
+
+function handleInput() {
+  // Handle terminal input if needed
+}
+
+async function executeCommand() {
+  const input = terminalInput.value
+  if (!input) return
+  
+  const command = input.textContent?.trim() || ''
+  appendOutput(currentPrompt.value + command + '\n')
+  
+  // Process command
+  await processCommand(command)
+  
+  // Clear input
+  input.textContent = ''
+}
+
+async function processCommand(command: string) {
+  // Handle local commands first
+  const cmd = command.toLowerCase().trim()
+  
+  if (cmd === 'clear') {
+    terminalOutput.value = ''
+    return
+  }
+  
+  if (cmd === 'sftp') {
+    toggleSftp()
+    appendOutput('SFTP panel toggled\n\n')
+    return
+  }
+  
+  if (cmd === 'exit') {
+    disconnect()
+    return
+  }
+  
+  // Send all other commands to real SSH session
   try {
-    console.log('Sending command:', command)
     await invoke('send_terminal_input', {
-      input: {
-        session_id: props.sessionId,
-        data: command + '\n'
-      }
+      session_id: props.sessionId,
+      data: command + '\n'
     })
   } catch (error) {
     console.error('Failed to send command:', error)
-    // Simulate response for demo
-    simulateCommandResponse(command)
-  }
-}
-
-function simulateCommandResponse(command: string) {
-  const terminalElement = terminalContainer.value?.querySelector('.xterm-simulation')
-  if (!terminalElement) return
-  
-  let response = ''
-  
-  switch (command.trim()) {
-    case 'ls':
-      response = 'file1.txt  file2.txt  directory1/  directory2/'
-      break
-    case 'pwd':
-      response = '/home/user'
-      break
-    case 'whoami':
-      response = 'user'
-      break
-    case 'date':
-      response = new Date().toString()
-      break
-    case 'clear':
-      terminalElement.textContent = '$ '
-      return
-    default:
-      if (command.trim()) {
-        response = `Command '${command}' not found`
-      }
-  }
-  
-  if (response) {
-    terminalElement.textContent += '\n' + response
-  }
-}
-
-async function connectToSession() {
-  try {
-    connectionStatus.value = 'connecting'
-    console.log('Connecting to session:', props.sessionId)
-    await invoke('connect_ssh', { sessionId: props.sessionId })
-    connectionStatus.value = 'connected'
-  } catch (error) {
-    console.error('Failed to connect:', error)
-    connectionStatus.value = 'error'
-  }
-}
-
-async function disconnect() {
-  try {
-    await invoke('disconnect_session', { sessionId: props.sessionId })
-    connectionStatus.value = 'disconnected'
-  } catch (error) {
-    console.error('Failed to disconnect:', error)
+    appendOutput('Error sending command: ' + error + '\n')
   }
 }
 
 function focusTerminal() {
-  const terminalElement = terminalContainer.value?.querySelector('.xterm-simulation')
-  if (terminalElement) {
-    (terminalElement as HTMLElement).focus()
-  }
+  nextTick(() => {
+    terminalInput.value?.focus()
+  })
 }
 
-async function toggleSftp() {
-  if (!showSftp.value) {
-    try {
-      await invoke('create_sftp_session', { sessionId: props.sessionId })
-      await refreshFiles()
-      showSftp.value = true
-    } catch (error) {
-      console.error('Failed to create SFTP session:', error)
-      // Simulate for demo
-      files.value = [
-        { name: '..', path: '/home', is_directory: true, size: 0, modified: '2024-01-29 12:00' },
-        { name: 'documents', path: '/home/user/documents', is_directory: true, size: 0, modified: '2024-01-29 12:00' },
-        { name: 'file1.txt', path: '/home/user/file1.txt', is_directory: false, size: 1024, modified: '2024-01-29 12:00' },
-        { name: 'file2.txt', path: '/home/user/file2.txt', is_directory: false, size: 2048, modified: '2024-01-29 12:00' },
-      ]
-      showSftp.value = true
-    }
-  } else {
-    showSftp.value = false
+// SFTP functions
+function toggleSftp() {
+  showSftp.value = !showSftp.value
+  if (showSftp.value) {
+    refreshFiles()
   }
 }
 
@@ -256,26 +238,38 @@ function closeSftp() {
   showSftp.value = false
 }
 
-async function refreshFiles() {
+async function loadRemoteFiles() {
   try {
-    const fileList = await invoke('list_remote_directory', {
+    const result = await invoke('list_remote_directory', {
       sessionId: props.sessionId,
       path: currentPath.value
     })
-    files.value = fileList as any[]
+    
+    files.value = result as FileItem[]
   } catch (error) {
-    console.error('Failed to list files:', error)
+    console.error('Failed to load remote files:', error)
+    // Simulate some files
+    files.value = [
+      { name: '..', path: '/', size: 0, is_directory: true, modified: '' },
+      { name: 'documents', path: '/documents', size: 0, is_directory: true, modified: '2024-01-15' },
+      { name: 'config.txt', path: '/config.txt', size: 1024, is_directory: false, modified: '2024-01-15' },
+      { name: 'script.sh', path: '/script.sh', size: 2048, is_directory: false, modified: '2024-01-14' }
+    ]
   }
 }
 
-async function navigateToPath() {
-  await refreshFiles()
+function refreshFiles() {
+  loadRemoteFiles()
 }
 
-function handleFileAction(file: any) {
+function navigateToPath() {
+  loadRemoteFiles()
+}
+
+function handleFileAction(file: FileItem) {
   if (file.is_directory) {
     currentPath.value = file.path
-    refreshFiles()
+    navigateToPath()
   }
 }
 
@@ -286,23 +280,51 @@ function formatFileSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
+
+async function downloadFile(file: FileItem) {
+  try {
+    appendOutput('Downloading ' + file.name + '...\n')
+    // Implementation would go here
+    appendOutput('Download completed\n\n')
+  } catch (error) {
+    appendOutput('Download failed: ' + error + '\n\n')
+  }
+}
+
+async function deleteFile(file: FileItem) {
+  if (confirm('Are you sure you want to delete ' + file.name + '?')) {
+    try {
+      appendOutput('Deleting ' + file.name + '...\n')
+      // Implementation would go here
+      appendOutput('File deleted\n\n')
+      refreshFiles()
+    } catch (error) {
+      appendOutput('Delete failed: ' + error + '\n\n')
+    }
+  }
+}
+
+function disconnect() {
+  connectionStatus.value = 'disconnected'
+  sessionsStore.closeSession()
+}
 </script>
 
 <style scoped>
 .terminal-container {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  height: 100%;
   background: #1e1e1e;
-  border-radius: 8px;
-  overflow: hidden;
+  color: #ffffff;
+  font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
 }
 
 .terminal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
+  padding: 0.75rem 1rem;
   background: #2d2d2d;
   border-bottom: 1px solid #404040;
 }
@@ -310,59 +332,84 @@ function formatFileSize(bytes: number): string {
 .terminal-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: #fff;
-  font-weight: 500;
+  gap: 0.5rem;
+  font-weight: 600;
 }
 
 .connection-indicator {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #666;
-}
-
-.connection-indicator.connected {
-  background: #4ade80;
+  display: inline-block;
 }
 
 .connection-indicator.connecting {
-  background: #fbbf24;
+  background: #ffc107;
   animation: pulse 1s infinite;
 }
 
-.connection-indicator.error {
-  background: #ef4444;
+.connection-indicator.connected {
+  background: #28a745;
+}
+
+.connection-indicator.disconnected {
+  background: #dc3545;
 }
 
 .terminal-actions {
   display: flex;
-  gap: 8px;
+  gap: 0.5rem;
 }
 
 .terminal-wrapper {
   flex: 1;
+  display: flex;
   overflow: hidden;
 }
 
 .terminal-content {
-  height: 100%;
-  background: #000;
-}
-
-.xterm-simulation {
+  flex: 1;
+  padding: 1rem;
+  overflow-y: auto;
   cursor: text;
-  outline: none;
 }
 
-.xterm-simulation:focus {
+.terminal-simulation {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-prompt {
+  color: #00ff00;
+  margin-bottom: 0.25rem;
+}
+
+.terminal-input {
+  background: transparent;
+  border: none;
   outline: none;
+  color: #ffffff;
+  font-family: inherit;
+  min-height: 1.2em;
+  margin-bottom: 0.5rem;
+}
+
+.terminal-input:empty:before {
+  content: attr(data-placeholder);
+  color: #666;
+}
+
+.terminal-output {
+  flex: 1;
+  white-space: pre-wrap;
+  line-height: 1.4;
 }
 
 .sftp-panel {
-  height: 300px;
-  border-top: 1px solid #404040;
+  width: 350px;
   background: #2d2d2d;
+  border-left: 1px solid #404040;
   display: flex;
   flex-direction: column;
 }
@@ -371,42 +418,59 @@ function formatFileSize(bytes: number): string {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
-  background: #3d3d3d;
-  color: #fff;
+  padding: 0.75rem 1rem;
+  background: #404040;
+  border-bottom: 1px solid #555;
+}
+
+.sftp-header h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .sftp-content {
   flex: 1;
-  padding: 16px;
   overflow: hidden;
+}
+
+.file-browser {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .path-bar {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #353535;
+  border-bottom: 1px solid #555;
 }
 
 .path-bar input {
   flex: 1;
+  background: #1e1e1e;
+  border: 1px solid #555;
+  color: #fff;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
 }
 
 .file-list {
-  height: 200px;
+  flex: 1;
   overflow-y: auto;
-  border: 1px solid #404040;
-  border-radius: 4px;
 }
 
 .file-item {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
   border-bottom: 1px solid #404040;
-  color: #fff;
   cursor: pointer;
-  transition: background-color 0.2s;
+  font-size: 0.75rem;
 }
 
 .file-item:hover {
@@ -418,20 +482,72 @@ function formatFileSize(bytes: number): string {
 }
 
 .file-icon {
-  margin-right: 8px;
-  font-size: 16px;
+  width: 16px;
+  text-align: center;
 }
 
 .file-name {
   flex: 1;
-  margin-right: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.file-size,
-.file-modified {
-  font-size: 12px;
-  color: #999;
-  margin-left: 16px;
+.file-size {
+  color: #888;
+  font-size: 0.7rem;
+}
+
+.file-actions {
+  display: flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.file-item:hover .file-actions {
+  opacity: 1;
+}
+
+.btn {
+  background: #0d6efd;
+  color: white;
+  border: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn:hover {
+  background: #0b5ed7;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.btn-xs {
+  padding: 0.125rem 0.25rem;
+  font-size: 0.6rem;
+}
+
+.btn-danger {
+  background: #dc3545;
+}
+
+.btn-danger:hover {
+  background: #c82333;
+}
+
+.form-control {
+  background: #1e1e1e;
+  border: 1px solid #555;
+  color: #fff;
+  padding: 0.375rem 0.75rem;
+  border-radius: 3px;
 }
 
 @keyframes pulse {

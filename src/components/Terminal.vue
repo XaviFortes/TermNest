@@ -49,18 +49,7 @@
         :class="{ 'with-connection-log': connectionStatus === 'connecting' }"
         @click="focusTerminal"
       >
-        <div class="terminal-simulation">
-          <div class="terminal-output" v-html="terminalOutput"></div>
-          <div class="terminal-input-line">
-            <div 
-              class="terminal-input" 
-              contenteditable="true"
-              @keydown="handleKeydown"
-              @keyup="handleInput"
-              ref="terminalInput"
-            ></div>
-          </div>
-        </div>
+        <!-- XTerm.js will be mounted here -->
       </div>
     </div>
     
@@ -108,10 +97,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useSessionsStore } from '../stores/sessions'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import '@xterm/xterm/css/xterm.css'
 
 interface Props {
   sessionId: string
@@ -132,9 +124,9 @@ const sessionsStore = useSessionsStore()
 
 // Terminal state
 const terminalContainer = ref<HTMLElement>()
-const terminalInput = ref<HTMLElement>()
 const connectionStatus = ref<'connecting' | 'connected' | 'disconnected'>('connecting')
-const terminalOutput = ref('')
+let terminal: Terminal | null = null
+let fitAddon: FitAddon | null = null
 
 // Connection log state
 const connectionSteps = ref([
@@ -162,6 +154,7 @@ let unlistenConnectionStatus: (() => void) | null = null
 
 // Initialize terminal
 onMounted(async () => {
+  setupTerminal()
   await initializeTerminal()
   await setupEventListeners()
   focusTerminal()
@@ -169,6 +162,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disconnect()
+  if (terminal) {
+    terminal.dispose()
+  }
   if (unlistenTerminalOutput) {
     unlistenTerminalOutput()
   }
@@ -245,92 +241,90 @@ async function initializeTerminal() {
     
     connectionStatus.value = 'connected'
     
-    // Send initial newline to trigger shell prompt
-    setTimeout(async () => {
-      try {
-        await invoke('send_terminal_input', {
-          sessionId: props.sessionId,
-          input: '\n'
-        })
-      } catch (error) {
-        console.error('Failed to send initial prompt:', error)
-      }
-    }, 500) // Small delay to ensure connection is fully established
-    
     if (props.protocol === 'SSH') {
       await loadRemoteFiles()
     }
   } catch (error) {
     console.error('Failed to initialize terminal:', error)
     connectionStatus.value = 'disconnected'
-    appendOutput('Failed to connect: ' + error + '\n')
+    if (terminal) {
+      terminal.write('Failed to connect: ' + error + '\r\n')
+    }
   }
 }
 
 function appendOutput(text: string) {
-  terminalOutput.value += text.replace(/\n/g, '<br>')
-}
-
-function handleKeydown(event: KeyboardEvent) {
-  if (event.key === 'Enter') {
-    event.preventDefault()
-    executeCommand()
+  if (terminal) {
+    terminal.write(text)
   }
 }
 
-function handleInput() {
-  // Handle terminal input if needed
-}
-
-async function executeCommand() {
-  const input = terminalInput.value
-  if (!input) return
+function setupTerminal() {
+  if (!terminalContainer.value) return
   
-  const command = input.textContent?.trim() || ''
+  // Create terminal instance
+  terminal = new Terminal({
+    theme: {
+      background: '#1a1a1a',
+      foreground: '#ffffff',
+      cursor: '#ffffff',
+      selectionBackground: '#3e3e3e',
+      black: '#000000',
+      red: '#ff5555',
+      green: '#50fa7b',
+      yellow: '#f1fa8c',
+      blue: '#bd93f9',
+      magenta: '#ff79c6',
+      cyan: '#8be9fd',
+      white: '#ffffff',
+      brightBlack: '#44475a',
+      brightRed: '#ff5555',
+      brightGreen: '#50fa7b',
+      brightYellow: '#f1fa8c',
+      brightBlue: '#bd93f9',
+      brightMagenta: '#ff79c6',
+      brightCyan: '#8be9fd',
+      brightWhite: '#ffffff'
+    },
+    fontSize: 14,
+    fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
+    cursorBlink: true,
+    convertEol: true,
+    scrollback: 1000
+  })
   
-  // Process command
-  await processCommand(command)
+  // Create fit addon
+  fitAddon = new FitAddon()
+  terminal.loadAddon(fitAddon)
   
-  // Clear input
-  input.textContent = ''
-}
-
-async function processCommand(command: string) {
-  // Handle local commands first
-  const cmd = command.toLowerCase().trim()
+  // Open terminal in container
+  terminal.open(terminalContainer.value)
+  fitAddon.fit()
   
-  if (cmd === 'clear') {
-    terminalOutput.value = ''
-    return
-  }
-  
-  if (cmd === 'sftp') {
-    toggleSftp()
-    appendOutput('SFTP panel toggled\n\n')
-    return
-  }
-  
-  if (cmd === 'exit') {
-    disconnect()
-    return
-  }
-  
-  // Send all other commands to real SSH session
-  try {
-    await invoke('send_terminal_input', {
+  // Handle user input
+  terminal.onData((data) => {
+    // Send input to SSH backend
+    invoke('send_terminal_input', {
       sessionId: props.sessionId,
-      input: command + '\n'
+      input: data
+    }).catch(error => {
+      console.error('Failed to send input:', error)
     })
-  } catch (error) {
-    console.error('Failed to send command:', error)
-    appendOutput('Error sending command: ' + error + '\n')
-  }
+  })
+  
+  // Handle resize
+  const resizeObserver = new ResizeObserver(() => {
+    if (fitAddon) {
+      fitAddon.fit()
+    }
+  })
+  resizeObserver.observe(terminalContainer.value)
 }
 
 function focusTerminal() {
-  nextTick(() => {
-    terminalInput.value?.focus()
-  })
+  if (terminal) {
+    terminal.focus()
+  }
 }
 
 // SFTP functions

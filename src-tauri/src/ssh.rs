@@ -219,17 +219,11 @@ impl SshManager {
 
         self.emit_status(&session_id, "connecting", Some("✅ Connection stored successfully"))?;
 
-        // Send initial newline to trigger shell prompt after a small delay
+        // Start terminal reader after initial setup
         let ssh_connection_for_init = ssh_connection.clone();
         let app_handle_clone = self.app_handle.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(2000)).await;
-            if let Ok(mut channel_guard) = ssh_connection_for_init.channel.lock() {
-                if let Some(ref mut channel) = *channel_guard {
-                    let _ = channel.write_all(b"\n");
-                    let _ = channel.flush();
-                }
-            }
+            tokio::time::sleep(Duration::from_millis(1000)).await;
             
             // Start terminal reader after initial setup
             let session_id_clone = ssh_connection_for_init.session_id.clone();

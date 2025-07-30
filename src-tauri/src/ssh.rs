@@ -1,21 +1,17 @@
 use anyhow::{anyhow, Result};
-use bytes::Bytes;
-use futures::stream::StreamExt;
-use serde::{Deserialize, Serialize};
 use ssh2::{Channel, Session, Sftp};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::mpsc;
 
-use crate::{AuthMethod, ConnectionStatus, FileItem, Protocol, Session as AppSession};
+use crate::{AuthMethod, ConnectionStatus, FileItem, Session as AppSession};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[allow(dead_code)]
 pub struct SshConnection {
     pub session_id: String,
     pub session: Arc<Mutex<Session>>,
@@ -24,7 +20,7 @@ pub struct SshConnection {
     pub app_session: AppSession,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SshManager {
     connections: Arc<Mutex<HashMap<String, SshConnection>>>,
     app_handle: AppHandle,
@@ -42,23 +38,42 @@ impl SshManager {
         let session_id = app_session.id.clone();
         
         // Emit connecting status
-        self.emit_status(&session_id, "connecting", Some(&format!("Connecting to {}@{}", app_session.username, app_session.host)))?;
+        self.emit_status(&session_id, "connecting", Some(&format!("🔌 Connecting to {}@{}:{}", app_session.username, app_session.host, app_session.port)))?;
 
-        // Create TCP connection
-        let tcp = TcpStream::connect(format!("{}:{}", app_session.host, app_session.port))
-            .map_err(|e| anyhow!("Failed to connect to {}:{}: {}", app_session.host, app_session.port, e))?;
+        // Create TCP connection with timeout
+        self.emit_status(&session_id, "connecting", Some(&format!("🌐 Resolving hostname: {}", app_session.host)))?;
+        let addr = format!("{}:{}", app_session.host, app_session.port);
+        let socket_addrs: Vec<std::net::SocketAddr> = addr.to_socket_addrs()
+            .map_err(|e| anyhow!("Failed to resolve address {}: {}", addr, e))?
+            .collect();
+        
+        self.emit_status(&session_id, "connecting", Some(&format!("🔗 Establishing TCP connection to {}", addr)))?;
+        let tcp = if let Some(socket_addr) = socket_addrs.first() {
+            TcpStream::connect_timeout(socket_addr, Duration::from_secs(10))
+                .map_err(|e| anyhow!("Failed to connect to {}: {}", addr, e))?
+        } else {
+            return Err(anyhow!("No valid socket address found for {}", addr));
+        };
+        self.emit_status(&session_id, "connecting", Some("✅ TCP connection established"))?;
 
         // Create SSH session
+        self.emit_status(&session_id, "connecting", Some("🔐 Initializing SSH session"))?;
         let mut session = Session::new().map_err(|e| anyhow!("Failed to create SSH session: {}", e))?;
         session.set_tcp_stream(tcp);
+        
+        self.emit_status(&session_id, "connecting", Some("🤝 Performing SSH protocol handshake"))?;
         session.handshake().map_err(|e| anyhow!("SSH handshake failed: {}", e))?;
+        self.emit_status(&session_id, "connecting", Some("✅ SSH handshake completed"))?;
 
         // Authenticate
+        self.emit_status(&session_id, "connecting", Some("🔑 Starting user authentication"))?;
         match &app_session.auth_method {
             AuthMethod::Password => {
+                self.emit_status(&session_id, "connecting", Some("❌ Password authentication not supported yet"))?;
                 return Err(anyhow!("Password authentication requires runtime password input"));
             }
             AuthMethod::PublicKey { key_path } => {
+                self.emit_status(&session_id, "connecting", Some(&format!("🔐 Trying primary SSH key: {}", key_path)))?;
                 let expanded_path = if key_path.starts_with("~/") {
                     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
                     key_path.replacen("~/", &format!("{}/", home), 1)
@@ -66,14 +81,87 @@ impl SshManager {
                     key_path.clone()
                 };
 
-                session
-                    .userauth_pubkey_file(&app_session.username, None, Path::new(&expanded_path), None)
-                    .map_err(|e| anyhow!("Public key authentication failed: {}", e))?;
+                // Try the specified key first
+                let mut auth_success = false;
+                if std::path::Path::new(&expanded_path).exists() {
+                    self.emit_status(&session_id, "connecting", Some(&format!("🔍 Key file found: {}", expanded_path)))?;
+                    if let Ok(_) = session.userauth_pubkey_file(&app_session.username, None, Path::new(&expanded_path), None) {
+                        self.emit_status(&session_id, "connecting", Some("✅ Primary key authentication successful"))?;
+                        auth_success = true;
+                    } else {
+                        self.emit_status(&session_id, "connecting", Some("❌ Primary key authentication failed"))?;
+                    }
+                } else {
+                    self.emit_status(&session_id, "connecting", Some(&format!("❌ Primary key file not found: {}", expanded_path)))?;
+                }
+                
+                // If specified key fails, try common key locations as fallback
+                if !auth_success {
+                    self.emit_status(&session_id, "connecting", Some("🔄 Trying fallback SSH keys"))?;
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+                    let common_keys = vec![
+                        format!("{}/.ssh/id_ed25519", home),
+                        format!("{}/.ssh/id_rsa", home),
+                        format!("{}/.ssh/id_ecdsa", home),
+                    ];
+                    
+                    for fallback_key in common_keys {
+                        if std::path::Path::new(&fallback_key).exists() {
+                            self.emit_status(&session_id, "connecting", Some(&format!("🔑 Trying fallback key: {}", fallback_key.split('/').last().unwrap_or("unknown"))))?;
+                            if let Ok(_) = session.userauth_pubkey_file(&app_session.username, None, Path::new(&fallback_key), None) {
+                                self.emit_status(&session_id, "connecting", Some(&format!("✅ Fallback key authentication successful: {}", fallback_key.split('/').last().unwrap_or("unknown"))))?;
+                                auth_success = true;
+                                break;
+                            } else {
+                                self.emit_status(&session_id, "connecting", Some(&format!("❌ Fallback key failed: {}", fallback_key.split('/').last().unwrap_or("unknown"))))?;
+                            }
+                        } else {
+                            self.emit_status(&session_id, "connecting", Some(&format!("⚠️ Fallback key not found: {}", fallback_key.split('/').last().unwrap_or("unknown"))))?;
+                        }
+                    }
+                }
+                
+                if !auth_success {
+                    return Err(anyhow!("Public key authentication failed. Tried:\n1. Specified key: {}\n2. Fallback keys: ~/.ssh/id_ed25519, ~/.ssh/id_rsa, ~/.ssh/id_ecdsa\n\nPlease check:\n1. Key files exist and have correct permissions (600)\n2. Key is in correct format\n3. Key matches server's authorized_keys", expanded_path));
+                }
             }
             AuthMethod::Agent => {
-                session
-                    .userauth_agent(&app_session.username)
-                    .map_err(|e| anyhow!("SSH agent authentication failed: {}", e))?;
+                self.emit_status(&session_id, "connecting", Some("🔐 Trying SSH agent authentication"))?;
+                // First try to connect to SSH agent
+                match session.userauth_agent(&app_session.username) {
+                    Ok(_) => {
+                        self.emit_status(&session_id, "connecting", Some("✅ SSH agent authentication successful"))?;
+                    },
+                    Err(e) => {
+                        self.emit_status(&session_id, "connecting", Some(&format!("❌ SSH agent failed: {}", e)))?;
+                        self.emit_status(&session_id, "connecting", Some("🔄 Falling back to key files"))?;
+                        // If agent fails, try common key locations as fallback
+                        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+                        let common_keys = vec![
+                            format!("{}/.ssh/id_rsa", home),
+                            format!("{}/.ssh/id_ed25519", home),
+                            format!("{}/.ssh/id_ecdsa", home),
+                        ];
+                        
+                        let mut key_found = false;
+                        for key_path in common_keys {
+                            if std::path::Path::new(&key_path).exists() {
+                                self.emit_status(&session_id, "connecting", Some(&format!("🔑 Trying fallback key: {}", key_path.split('/').last().unwrap_or("unknown"))))?;
+                                if let Ok(_) = session.userauth_pubkey_file(&app_session.username, None, Path::new(&key_path), None) {
+                                    self.emit_status(&session_id, "connecting", Some(&format!("✅ Fallback key successful: {}", key_path.split('/').last().unwrap_or("unknown"))))?;
+                                    key_found = true;
+                                    break;
+                                } else {
+                                    self.emit_status(&session_id, "connecting", Some(&format!("❌ Fallback key failed: {}", key_path.split('/').last().unwrap_or("unknown"))))?;
+                                }
+                            }
+                        }
+                        
+                        if !key_found {
+                            return Err(anyhow!("SSH agent authentication failed: {}.\n\nTroubleshooting:\n1. Start SSH agent: eval $(ssh-agent)\n2. Add keys: ssh-add ~/.ssh/id_rsa\n3. Or switch to 'PublicKey' auth method and specify key path", e));
+                        }
+                    }
+                }
             }
         }
 
@@ -81,28 +169,46 @@ impl SshManager {
             return Err(anyhow!("Authentication failed"));
         }
 
+        self.emit_status(&session_id, "connecting", Some("✅ User authentication completed"))?;
+
         // Create PTY channel
+        self.emit_status(&session_id, "connecting", Some("📺 Creating terminal session"))?;
         let mut channel = session
             .channel_session()
             .map_err(|e| anyhow!("Failed to create SSH channel: {}", e))?;
 
         // Request PTY
+        self.emit_status(&session_id, "connecting", Some("🖥️ Requesting pseudo-terminal (PTY)"))?;
         channel
             .request_pty("xterm-256color", None, Some((80, 24, 0, 0)))
             .map_err(|e| anyhow!("Failed to request PTY: {}", e))?;
+        self.emit_status(&session_id, "connecting", Some("✅ PTY allocated"))?;
 
         // Start shell
+        self.emit_status(&session_id, "connecting", Some("🐚 Starting remote shell"))?;
         channel.shell().map_err(|e| anyhow!("Failed to start shell: {}", e))?;
+        self.emit_status(&session_id, "connecting", Some("✅ Shell started"))?;
 
-        // Create SFTP session
-        let sftp = session.sftp().map_err(|e| anyhow!("Failed to create SFTP session: {}", e))?;
+        // Create SFTP session (optional, non-blocking)
+        self.emit_status(&session_id, "connecting", Some("📂 Initializing SFTP support"))?;
+        let sftp = match session.sftp() {
+            Ok(sftp) => {
+                self.emit_status(&session_id, "connecting", Some("✅ SFTP support enabled"))?;
+                Some(sftp)
+            }
+            Err(e) => {
+                self.emit_status(&session_id, "connecting", Some(&format!("⚠️ SFTP not available: {}", e)))?;
+                None
+            }
+        };
 
         // Store connection
+        self.emit_status(&session_id, "connecting", Some("💾 Storing connection details"))?;
         let ssh_connection = SshConnection {
             session_id: session_id.clone(),
             session: Arc::new(Mutex::new(session)),
             channel: Arc::new(Mutex::new(Some(channel))),
-            sftp: Arc::new(Mutex::new(Some(sftp))),
+            sftp: Arc::new(Mutex::new(sftp)),
             app_session: app_session.clone(),
         };
 
@@ -112,10 +218,25 @@ impl SshManager {
         }
 
         // Start terminal output reader
+        self.emit_status(&session_id, "connecting", Some("📡 Setting up terminal I/O streams"))?;
         self.start_terminal_reader(ssh_connection.clone()).await?;
+        self.emit_status(&session_id, "connecting", Some("✅ Terminal I/O ready"))?;
+
+        // Send initial newline to trigger shell prompt after a small delay
+        let ssh_connection_for_init = ssh_connection.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if let Ok(mut channel_guard) = ssh_connection_for_init.channel.lock() {
+                if let Some(ref mut channel) = *channel_guard {
+                    let _ = channel.write_all(b"\n");
+                    let _ = channel.flush();
+                }
+            }
+        });
 
         // Emit connected status
-        self.emit_status(&session_id, "connected", Some("Connection established"))?;
+        self.emit_status(&session_id, "connected", Some("🎉 SSH connection established successfully!"))?;
+        self.emit_status(&session_id, "connected", Some(&format!("Ready to use terminal on {}@{}", app_session.username, app_session.host)))?;
 
         Ok(format!("Connected to {}@{}", app_session.username, app_session.host))
     }
@@ -146,7 +267,7 @@ impl SshManager {
     pub async fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
         let connections = self.connections.lock().unwrap();
         if let Some(connection) = connections.get(session_id) {
-            if let Ok(channel_guard) = connection.channel.lock() {
+            if let Ok(mut channel_guard) = connection.channel.lock() {
                 if let Some(ref mut channel) = *channel_guard {
                     channel.write_all(input.as_bytes())
                         .map_err(|e| anyhow!("Failed to send input: {}", e))?;
@@ -211,22 +332,20 @@ impl SshManager {
                     }
 
                     return Ok(files);
+                } else {
+                    return Err(anyhow!("SFTP is not available for this session. SFTP may not be supported by the server or failed to initialize during connection."));
                 }
             }
         }
-        Err(anyhow!("No SFTP connection found for session {}", session_id))
+        Err(anyhow!("No SSH connection found for session {}", session_id))
     }
 
     pub fn get_connection_status(&self, session_id: &str) -> Option<ConnectionStatus> {
         let connections = self.connections.lock().unwrap();
         if connections.contains_key(session_id) {
-            Some(ConnectionStatus {
-                session_id: session_id.to_string(),
-                status: "connected".to_string(),
-                message: Some("Connected".to_string()),
-            })
+            Some(ConnectionStatus::Connected)
         } else {
-            None
+            Some(ConnectionStatus::Disconnected)
         }
     }
 
@@ -237,7 +356,7 @@ impl SshManager {
         tokio::spawn(async move {
             let mut buffer = [0u8; 4096];
             loop {
-                if let Ok(channel_guard) = connection.channel.lock() {
+                if let Ok(mut channel_guard) = connection.channel.lock() {
                     if let Some(ref mut channel) = *channel_guard {
                         match channel.read(&mut buffer) {
                             Ok(0) => break, // EOF
@@ -269,14 +388,20 @@ impl SshManager {
     }
 
     fn emit_status(&self, session_id: &str, status: &str, message: Option<&str>) -> Result<()> {
-        let status = ConnectionStatus {
-            session_id: session_id.to_string(),
-            status: status.to_string(),
-            message: message.map(|s| s.to_string()),
+        let status_enum = match status {
+            "connecting" => ConnectionStatus::Connecting,
+            "connected" => ConnectionStatus::Connected,
+            "disconnected" => ConnectionStatus::Disconnected,
+            _ => ConnectionStatus::Error(message.unwrap_or("Unknown error").to_string()),
         };
         
         self.app_handle
-            .emit("connection_status", &status)
+            .emit("connection_status", &serde_json::json!({
+                "session_id": session_id,
+                "status": status,
+                "status_enum": status_enum,
+                "message": message
+            }))
             .map_err(|e| anyhow!("Failed to emit status: {}", e))?;
         
         Ok(())

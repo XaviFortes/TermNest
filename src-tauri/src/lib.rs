@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
 mod ssh;
@@ -36,29 +36,11 @@ pub enum Protocol {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConnectionStatus {
-    pub session_id: String,
-    pub status: String,
-    pub message: Option<String>,
-}
-
-// Create session request structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateSessionRequest {
-    pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub username: String,
-    pub password: Option<String>,
-    pub private_key_path: Option<String>,
-    pub protocol: Protocol,
-}
-
-// Terminal input structure
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminalInput {
-    pub session_id: String,
-    pub data: String,
+pub enum ConnectionStatus {
+    Connected,
+    Disconnected,
+    Connecting,
+    Error(String),
 }
 
 // File item for SFTP
@@ -101,105 +83,133 @@ async fn list_sessions(state: State<'_, AppState>) -> Result<Vec<Session>, Strin
 }
 
 #[tauri::command]
+async fn load_sessions_from_store(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<Session>, String> {
+    use tauri_plugin_store::StoreExt;
+    
+    let store = app.store("sessions.json").map_err(|e| e.to_string())?;
+    
+    if let Some(sessions_value) = store.get("sessions") {
+        let sessions: Vec<Session> = serde_json::from_value(sessions_value.clone())
+            .map_err(|e| e.to_string())?;
+        
+        // Load into state
+        let mut state_sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        for session in &sessions {
+            state_sessions.insert(session.id.clone(), session.clone());
+        }
+        
+        Ok(sessions)
+    } else {
+        Ok(vec![])
+    }
+}
+
+async fn save_sessions_to_store(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use tauri_plugin_store::StoreExt;
+    
+    let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+    let sessions_vec: Vec<Session> = sessions.values().cloned().collect();
+    
+    let store = app.store("sessions.json").map_err(|e| e.to_string())?;
+    store.set("sessions", serde_json::to_value(sessions_vec).map_err(|e| e.to_string())?);
+    store.save().map_err(|e| e.to_string())?;
+    
+    Ok(())
+}
+
+#[tauri::command]
 async fn create_session(
+    state: State<'_, AppState>,
+    app: AppHandle,
     name: String,
     host: String,
     port: u16,
     username: String,
-    password: Option<String>,
-    private_key_path: Option<String>,
     protocol: Protocol,
-    state: State<'_, AppState>,
 ) -> Result<Session, String> {
-    println!("Creating session: {} @ {}:{}", name, host, port);
+    // Generate a unique session ID
+    let session_id = Uuid::new_v4().to_string();
     
     let session = Session {
-        id: Uuid::new_v4().to_string(),
+        id: session_id.clone(),
         name,
         host,
         port,
         username,
-        auth_method: if password.is_some() {
-            AuthMethod::Password
-        } else if private_key_path.is_some() {
-            AuthMethod::PublicKey { 
-                key_path: private_key_path.unwrap_or_default() 
-            }
-        } else {
-            AuthMethod::Agent
-        },
         protocol,
+        auth_method: AuthMethod::PublicKey { key_path: "~/.ssh/id_ed25519".to_string() },
         created_at: chrono::Utc::now().to_rfc3339(),
         last_used: None,
     };
 
-    let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    sessions.insert(session.id.clone(), session.clone());
-    
+    // Insert session and drop guard before await
+    {
+        let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        sessions.insert(session_id.clone(), session.clone());
+    }
+
+    save_sessions_to_store(app, state).await?;
     Ok(session)
 }
 
 #[tauri::command]
 async fn update_session(
-    session: Session,
     state: State<'_, AppState>,
+    app: AppHandle,
+    #[allow(non_snake_case)] sessionId: String,
+    session: Session,
 ) -> Result<Session, String> {
-    let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    sessions.insert(session.id.clone(), session.clone());
+    // Update session and drop guard before await
+    {
+        let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        sessions.insert(sessionId, session.clone());
+    }
+
+    save_sessions_to_store(app, state).await?;
     Ok(session)
 }
 
 #[tauri::command]
 async fn delete_session(
-    sessionId: String,
     state: State<'_, AppState>,
+    app: AppHandle,
+    #[allow(non_snake_case)] sessionId: String,
 ) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    sessions.remove(&sessionId);
+    // Remove session and drop guard before await
+    {
+        let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+        sessions.remove(&sessionId);
+    }
+
+    save_sessions_to_store(app, state).await?;
     Ok(())
 }
 
 #[tauri::command]
 async fn connect_ssh(
-    sessionId: String,
     state: State<'_, AppState>,
-    app: AppHandle,
-) -> Result<String, String> {
-    // Get session details
+    #[allow(non_snake_case)] sessionId: String,
+) -> Result<(), String> {
     let session = {
         let sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.get(&sessionId).cloned()
-            .ok_or_else(|| "Session not found".to_string())?
+        sessions.get(&sessionId).cloned().ok_or("Session not found")?
     };
 
-    // Use real SSH connection
+    // Update connection status
+    {
+        let mut connections = state.active_connections.lock().map_err(|e| e.to_string())?;
+        connections.insert(sessionId.clone(), ConnectionStatus::Connecting);
+    }
+
     match state.ssh_manager.connect(session).await {
-        Ok(result) => {
-            // Update local connection status
+        Ok(_) => {
             let mut connections = state.active_connections.lock().map_err(|e| e.to_string())?;
-            connections.insert(sessionId.clone(), ConnectionStatus {
-                session_id: sessionId.clone(),
-                status: "connected".to_string(),
-                message: Some("Connected".to_string()),
-            });
-            Ok(result)
+            connections.insert(sessionId, ConnectionStatus::Connected);
+            Ok(())
         }
         Err(e) => {
-            // Update connection status to failed
             let mut connections = state.active_connections.lock().map_err(|e| e.to_string())?;
-            connections.insert(sessionId.clone(), ConnectionStatus {
-                session_id: sessionId.clone(),
-                status: "failed".to_string(),
-                message: Some(e.to_string()),
-            });
-            
-            // Emit failed status
-            app.emit("connection_status", &ConnectionStatus {
-                session_id: sessionId.clone(),
-                status: "failed".to_string(),
-                message: Some(e.to_string()),
-            }).map_err(|e| e.to_string())?;
-            
+            connections.insert(sessionId, ConnectionStatus::Error(e.to_string()));
             Err(e.to_string())
         }
     }
@@ -207,50 +217,32 @@ async fn connect_ssh(
 
 #[tauri::command]
 async fn disconnect_session(
-    sessionId: String,
     state: State<'_, AppState>,
-    app: AppHandle,
+    #[allow(non_snake_case)] sessionId: String,
 ) -> Result<(), String> {
-    // Disconnect real SSH connection
     state.ssh_manager.disconnect(&sessionId).await.map_err(|e| e.to_string())?;
-
-    // Remove from local active connections
-    {
-        let mut connections = state.active_connections.lock().map_err(|e| e.to_string())?;
-        connections.remove(&sessionId);
-    }
-
+    
+    let mut connections = state.active_connections.lock().map_err(|e| e.to_string())?;
+    connections.insert(sessionId, ConnectionStatus::Disconnected);
+    
     Ok(())
 }
 
 #[tauri::command]
 async fn send_terminal_input(
-    input: TerminalInput,
     state: State<'_, AppState>,
+    _app: AppHandle,
+    #[allow(non_snake_case)] sessionId: String,
+    input: String,
 ) -> Result<(), String> {
-    state.ssh_manager.send_input(&input.session_id, &input.data).await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn get_connection_status(
-    session_id: String,
-    state: State<'_, AppState>,
-) -> Result<Option<ConnectionStatus>, String> {
-    // Check real SSH connection status first
-    if let Some(status) = state.ssh_manager.get_connection_status(&session_id) {
-        return Ok(Some(status));
-    }
-    
-    // Fall back to local status
-    let connections = state.active_connections.lock().map_err(|e| e.to_string())?;
-    Ok(connections.get(&session_id).cloned())
+    state.ssh_manager.send_input(&sessionId, &input).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn list_remote_directory(
-    sessionId: String,
-    path: String,
     state: State<'_, AppState>,
+    #[allow(non_snake_case)] sessionId: String,
+    path: String,
 ) -> Result<Vec<FileItem>, String> {
     state.ssh_manager.list_directory(&sessionId, &path).await.map_err(|e| e.to_string())
 }
@@ -258,8 +250,7 @@ async fn list_remote_directory(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             let app_handle = app.handle().clone();
             app.manage(AppState::new(app_handle));
@@ -268,13 +259,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             list_sessions,
+            load_sessions_from_store,
             create_session,
             update_session,
             delete_session,
             connect_ssh,
             disconnect_session,
             send_terminal_input,
-            get_connection_status,
             list_remote_directory
         ])
         .run(tauri::generate_context!())

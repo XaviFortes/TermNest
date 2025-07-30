@@ -16,21 +16,50 @@
     </div>
     
     <div class="terminal-wrapper">
+      <!-- Connection Log (only shown when connecting) -->
+      <div v-if="connectionStatus === 'connecting'" class="connection-log">
+        <div class="connection-log-header">
+          <div class="connection-spinner"></div>
+          <h4>Establishing SSH Connection</h4>
+        </div>
+        <div class="connection-steps">
+          <div 
+            v-for="(step, index) in connectionSteps" 
+            :key="index"
+            class="connection-step"
+            :class="{ 'active': index === currentStepIndex, 'completed': index < currentStepIndex }"
+          >
+            <div class="step-indicator">
+              <span v-if="index < currentStepIndex" class="step-check">✓</span>
+              <span v-else-if="index === currentStepIndex" class="step-spinner">⟳</span>
+              <span v-else class="step-pending">○</span>
+            </div>
+            <div class="step-text">{{ step }}</div>
+          </div>
+        </div>
+        <div v-if="currentStepMessage" class="current-step-message">
+          {{ currentStepMessage }}
+        </div>
+      </div>
+
+      <!-- Terminal Content -->
       <div 
         ref="terminalContainer" 
         class="terminal-content"
+        :class="{ 'with-connection-log': connectionStatus === 'connecting' }"
         @click="focusTerminal"
       >
         <div class="terminal-simulation">
-          <div class="terminal-prompt">{{ currentPrompt }}</div>
-          <div 
-            class="terminal-input" 
-            contenteditable="true"
-            @keydown="handleKeydown"
-            @keyup="handleInput"
-            ref="terminalInput"
-          ></div>
           <div class="terminal-output" v-html="terminalOutput"></div>
+          <div class="terminal-input-line">
+            <div 
+              class="terminal-input" 
+              contenteditable="true"
+              @keydown="handleKeydown"
+              @keyup="handleInput"
+              ref="terminalInput"
+            ></div>
+          </div>
         </div>
       </div>
     </div>
@@ -106,7 +135,21 @@ const terminalContainer = ref<HTMLElement>()
 const terminalInput = ref<HTMLElement>()
 const connectionStatus = ref<'connecting' | 'connected' | 'disconnected'>('connecting')
 const terminalOutput = ref('')
-const currentPrompt = ref('user@localhost:~$ ')
+
+// Connection log state
+const connectionSteps = ref([
+  'Establishing TCP connection',
+  'Creating SSH session',
+  'Performing SSH handshake',
+  'Authenticating user',
+  'Authentication successful',
+  'Creating terminal session',
+  'Starting remote shell',
+  'Setting up terminal I/O',
+  'Connection established'
+])
+const currentStepIndex = ref(0)
+const currentStepMessage = ref('')
 
 // SFTP state
 const showSftp = ref(false)
@@ -115,6 +158,7 @@ const files = ref<FileItem[]>([])
 
 // Event listener cleanup
 let unlistenTerminalOutput: (() => void) | null = null
+let unlistenConnectionStatus: (() => void) | null = null
 
 // Initialize terminal
 onMounted(async () => {
@@ -128,6 +172,9 @@ onUnmounted(() => {
   if (unlistenTerminalOutput) {
     unlistenTerminalOutput()
   }
+  if (unlistenConnectionStatus) {
+    unlistenConnectionStatus()
+  }
 })
 
 async function setupEventListeners() {
@@ -138,6 +185,55 @@ async function setupEventListeners() {
       appendOutput(payload.data)
     }
   })
+
+  // Listen for connection status updates
+  unlistenConnectionStatus = await listen('connection_status', (event: any) => {
+    const payload = event.payload
+    if (payload.session_id === props.sessionId) {
+      updateConnectionProgress(payload.status, payload.message)
+    }
+  })
+}
+
+function updateConnectionProgress(status: string, message?: string) {
+  currentStepMessage.value = message || ''
+  
+  if (status === 'connecting' && message) {
+    // Map status messages to step indices
+    const stepMap: { [key: string]: number } = {
+      'Establishing TCP connection': 0,
+      'Creating SSH session': 1,
+      'Performing SSH handshake': 2,
+      'Authenticating user': 3,
+      'Authentication successful': 4,
+      'Creating terminal session': 5,
+      'Starting remote shell': 6,
+      'Setting up terminal I/O': 7
+    }
+    
+    // Find matching step or advance by keywords
+    for (const [keyword, index] of Object.entries(stepMap)) {
+      if (message.includes(keyword) || message.toLowerCase().includes(keyword.toLowerCase())) {
+        currentStepIndex.value = index
+        break
+      }
+    }
+    
+    // Handle specific cases
+    if (message.includes('TCP connection')) currentStepIndex.value = 0
+    else if (message.includes('SSH session')) currentStepIndex.value = 1
+    else if (message.includes('handshake')) currentStepIndex.value = 2
+    else if (message.includes('Authenticating')) currentStepIndex.value = 3
+    else if (message.includes('Authentication successful')) currentStepIndex.value = 4
+    else if (message.includes('terminal session')) currentStepIndex.value = 5
+    else if (message.includes('remote shell')) currentStepIndex.value = 6
+    else if (message.includes('terminal I/O')) currentStepIndex.value = 7
+  } else if (status === 'connected') {
+    currentStepIndex.value = connectionSteps.value.length - 1
+    connectionStatus.value = 'connected'
+  } else if (status === 'disconnected') {
+    connectionStatus.value = 'disconnected'
+  }
 }
 
 async function initializeTerminal() {
@@ -148,6 +244,18 @@ async function initializeTerminal() {
     await sessionsStore.connectToSession(props.sessionId)
     
     connectionStatus.value = 'connected'
+    
+    // Send initial newline to trigger shell prompt
+    setTimeout(async () => {
+      try {
+        await invoke('send_terminal_input', {
+          sessionId: props.sessionId,
+          input: '\n'
+        })
+      } catch (error) {
+        console.error('Failed to send initial prompt:', error)
+      }
+    }, 500) // Small delay to ensure connection is fully established
     
     if (props.protocol === 'SSH') {
       await loadRemoteFiles()
@@ -179,7 +287,6 @@ async function executeCommand() {
   if (!input) return
   
   const command = input.textContent?.trim() || ''
-  appendOutput(currentPrompt.value + command + '\n')
   
   // Process command
   await processCommand(command)
@@ -211,8 +318,8 @@ async function processCommand(command: string) {
   // Send all other commands to real SSH session
   try {
     await invoke('send_terminal_input', {
-      session_id: props.sessionId,
-      data: command + '\n'
+      sessionId: props.sessionId,
+      input: command + '\n'
     })
   } catch (error) {
     console.error('Failed to send command:', error)
@@ -364,7 +471,127 @@ function disconnect() {
 .terminal-wrapper {
   flex: 1;
   display: flex;
+  flex-direction: column;
   overflow: hidden;
+}
+
+/* Connection Log Styles */
+.connection-log {
+  background: #2a2a2a;
+  border-bottom: 1px solid #404040;
+  padding: 1.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.connection-log-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.connection-log-header h4 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.connection-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #404040;
+  border-top: 2px solid #007acc;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.connection-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.connection-step {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+}
+
+.connection-step.active {
+  background: rgba(0, 122, 204, 0.1);
+  border-left: 3px solid #007acc;
+}
+
+.connection-step.completed {
+  opacity: 0.7;
+}
+
+.step-indicator {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.step-check {
+  background: #28a745;
+  color: white;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.step-spinner {
+  color: #007acc;
+  animation: rotate 1s linear infinite;
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.step-pending {
+  color: #666;
+  border: 2px solid #666;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.step-text {
+  color: #ffffff;
+  font-size: 0.9rem;
+}
+
+.current-step-message {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: rgba(0, 122, 204, 0.1);
+  border-radius: 6px;
+  color: #007acc;
+  font-size: 0.85rem;
+  font-style: italic;
 }
 
 .terminal-content {

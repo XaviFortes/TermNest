@@ -49,15 +49,27 @@ export const useSessionsStore = defineStore('sessions', () => {
     try {
       isLoading.value = true
       error.value = null
-      console.log('Store: Loading sessions...')
-      const result = await invoke<Session[]>('list_sessions')
-      console.log('Store: Loaded sessions:', result)
-      sessions.value = result
+      
+      // First try to load from persistent store
+      const storedSessions = await invoke<Session[]>('load_sessions_from_store')
+      sessions.value = storedSessions
+      
+      console.log('Loaded sessions from store:', storedSessions)
     } catch (err) {
-      console.error('Store: Failed to load sessions:', err)
+      console.error('Failed to load sessions:', err)
       error.value = err as string
     } finally {
       isLoading.value = false
+    }
+  }
+
+  async function saveSessions() {
+    try {
+      await invoke('save_sessions_to_store')
+      console.log('Sessions saved to store')
+    } catch (err) {
+      console.error('Failed to save sessions:', err)
+      error.value = err as string
     }
   }
 
@@ -205,6 +217,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     connectedSessions,
     // Actions
     loadSessions,
+    saveSessions,
     createSession,
     updateSession,
     deleteSession,

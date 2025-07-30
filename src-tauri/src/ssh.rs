@@ -217,21 +217,57 @@ impl SshManager {
             connections.insert(session_id.clone(), ssh_connection.clone());
         }
 
-        // Start terminal output reader
-        self.emit_status(&session_id, "connecting", Some("📡 Setting up terminal I/O streams"))?;
-        self.start_terminal_reader(ssh_connection.clone()).await?;
-        self.emit_status(&session_id, "connecting", Some("✅ Terminal I/O ready"))?;
+        self.emit_status(&session_id, "connecting", Some("✅ Connection stored successfully"))?;
 
         // Send initial newline to trigger shell prompt after a small delay
         let ssh_connection_for_init = ssh_connection.clone();
+        let app_handle_clone = self.app_handle.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(2000)).await;
             if let Ok(mut channel_guard) = ssh_connection_for_init.channel.lock() {
                 if let Some(ref mut channel) = *channel_guard {
                     let _ = channel.write_all(b"\n");
                     let _ = channel.flush();
                 }
             }
+            
+            // Start terminal reader after initial setup
+            let session_id_clone = ssh_connection_for_init.session_id.clone();
+            tokio::spawn(async move {
+                let mut buffer = [0u8; 4096];
+                loop {
+                    let read_result = tokio::task::spawn_blocking({
+                        let connection_clone = ssh_connection_for_init.clone();
+                        move || {
+                            if let Ok(mut channel_guard) = connection_clone.channel.lock() {
+                                if let Some(ref mut channel) = *channel_guard {
+                                    channel.read(&mut buffer).map(|n| (n, buffer))
+                                } else {
+                                    Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Channel closed"))
+                                }
+                            } else {
+                                Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Cannot lock channel"))
+                            }
+                        }
+                    }).await;
+
+                    match read_result {
+                        Ok(Ok((0, _))) => break,
+                        Ok(Ok((n, buffer))) => {
+                            let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                            let _ = app_handle_clone.emit("terminal_output", serde_json::json!({
+                                "session_id": session_id_clone,
+                                "data": output
+                            }));
+                        }
+                        _ => {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    }
+                    
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            });
         });
 
         // Emit connected status
@@ -349,38 +385,54 @@ impl SshManager {
         }
     }
 
-    async fn start_terminal_reader(&self, connection: SshConnection) -> Result<()> {
+    fn start_terminal_reader(&self, connection: SshConnection) -> Result<()> {
         let app_handle = self.app_handle.clone();
         let session_id = connection.session_id.clone();
 
         tokio::spawn(async move {
-            let mut buffer = [0u8; 4096];
+            // Give the shell a moment to start up
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            
             loop {
-                if let Ok(mut channel_guard) = connection.channel.lock() {
-                    if let Some(ref mut channel) = *channel_guard {
-                        match channel.read(&mut buffer) {
-                            Ok(0) => break, // EOF
-                            Ok(n) => {
-                                let output = String::from_utf8_lossy(&buffer[..n]).to_string();
-                                let _ = app_handle.emit("terminal_output", serde_json::json!({
-                                    "session_id": session_id,
-                                    "data": output
-                                }));
-                            }
-                            Err(e) => {
-                                eprintln!("Error reading from channel: {}", e);
-                                break;
-                            }
+                let connection_clone = connection.clone();
+                let session_id_clone = session_id.clone();
+                
+                // Use spawn_blocking to handle the potentially blocking read operation
+                let read_result = tokio::task::spawn_blocking(move || {
+                    let mut buffer = [0u8; 4096];
+                    if let Ok(mut channel_guard) = connection_clone.channel.lock() {
+                        if let Some(ref mut channel) = *channel_guard {
+                            channel.read(&mut buffer).map(|n| (n, buffer))
+                        } else {
+                            Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Channel closed"))
                         }
                     } else {
+                        Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Cannot lock channel"))
+                    }
+                }).await;
+
+                match read_result {
+                    Ok(Ok((0, _))) => break, // EOF
+                    Ok(Ok((n, buffer))) => {
+                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        let _ = app_handle.emit("terminal_output", serde_json::json!({
+                            "session_id": session_id,
+                            "data": output
+                        }));
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("Error reading from channel: {}", e);
+                        // Don't break immediately, give it another chance
+                        tokio::time::sleep(Duration::from_millis(1000)).await;
+                    }
+                    Err(e) => {
+                        eprintln!("Task join error: {}", e);
                         break;
                     }
-                } else {
-                    break;
                 }
                 
                 // Small delay to prevent busy loop
-                tokio::time::sleep(Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
         });
 

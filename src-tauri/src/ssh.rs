@@ -10,6 +10,29 @@ use tauri::{AppHandle, Emitter};
 
 use crate::{AuthMethod, ConnectionStatus, FileItem, Session as AppSession};
 
+// Utility functions
+fn get_home_directory() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\Default".to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+    }
+}
+
+fn get_filename_from_path(path: &str) -> &str {
+    #[cfg(target_os = "windows")]
+    {
+        path.split('\\').last().unwrap_or("unknown")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        path.split('/').last().unwrap_or("unknown")
+    }
+}
+
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct SshConnection {
@@ -65,7 +88,27 @@ impl SshManager {
         session.handshake().map_err(|e| anyhow!("SSH handshake failed: {}", e))?;
         self.emit_status(&session_id, "connecting", Some("✅ SSH handshake completed"))?;
 
-        // Authenticate
+        // Check session state and server capabilities
+        println!("DEBUG: Querying authentication methods for user: {}", app_session.username);
+        let auth_methods = match session.auth_methods(&app_session.username) {
+            Ok(methods) => {
+                println!("DEBUG: Server supports auth methods: {}", methods);
+                self.emit_status(&session_id, "connecting", Some(&format!("🔍 Server auth methods: {}", methods)))?;
+                methods.to_string()
+            }
+            Err(e) => {
+                println!("DEBUG: Failed to query auth methods: {}", e);
+                self.emit_status(&session_id, "connecting", Some(&format!("⚠️ Could not query auth methods: {}", e)))?;
+                "publickey,password".to_string() // Default assumption
+            }
+        };
+
+        // Check if server supports public key authentication
+        if !auth_methods.contains("publickey") {
+            return Err(anyhow!("Server does not support public key authentication. Supported methods: {}", auth_methods));
+        }
+
+        println!("DEBUG: Starting user authentication");
         self.emit_status(&session_id, "connecting", Some("🔑 Starting user authentication"))?;
         match &app_session.auth_method {
             AuthMethod::Password => {
@@ -83,46 +126,235 @@ impl SshManager {
 
                 // Try the specified key first
                 let mut auth_success = false;
+                println!("DEBUG: Checking key file: {}", expanded_path);
                 if std::path::Path::new(&expanded_path).exists() {
                     self.emit_status(&session_id, "connecting", Some(&format!("🔍 Key file found: {}", expanded_path)))?;
-                    if let Ok(_) = session.userauth_pubkey_file(&app_session.username, None, Path::new(&expanded_path), None) {
-                        self.emit_status(&session_id, "connecting", Some("✅ Primary key authentication successful"))?;
-                        auth_success = true;
+                    
+                    // Check if this is an Ed25519 key and try different approaches
+                    if expanded_path.contains("id_ed25519") {
+                        println!("DEBUG: Detected Ed25519 key, trying different authentication methods");
+                        
+                        // Method 1: Try with explicit None passphrase
+                        println!("DEBUG: Method 1 - Ed25519 with None passphrase");
+                        
+                        // Check if corresponding public key exists
+                        let pub_key_path = format!("{}.pub", expanded_path);
+                        println!("DEBUG: Checking for public key: {}", pub_key_path);
+                        if std::path::Path::new(&pub_key_path).exists() {
+                            println!("DEBUG: Public key found: {}", pub_key_path);
+                        } else {
+                            println!("DEBUG: Public key NOT found: {}", pub_key_path);
+                        }
+                        
+                        // Try to read the private key content to check format
+                        match std::fs::read_to_string(&expanded_path) {
+                            Ok(key_content) => {
+                                let lines: Vec<&str> = key_content.lines().collect();
+                                println!("DEBUG: Private key has {} lines", lines.len());
+                                if let Some(first_line) = lines.first() {
+                                    println!("DEBUG: Key starts with: {}", first_line);
+                                }
+                                if let Some(last_line) = lines.last() {
+                                    println!("DEBUG: Key ends with: {}", last_line);
+                                }
+                            }
+                            Err(e) => {
+                                println!("DEBUG: Failed to read private key: {}", e);
+                            }
+                        }
+                        
+                        println!("DEBUG: Session authenticated before attempt: {}", session.authenticated());
+                        match session.userauth_pubkey_file(&app_session.username, Some(Path::new(&pub_key_path)), Path::new(&expanded_path), None) {
+                            Ok(_) => {
+                                println!("DEBUG: Ed25519 authentication successful with None passphrase!");
+                                println!("DEBUG: Session authenticated after success: {}", session.authenticated());
+                                self.emit_status(&session_id, "connecting", Some("✅ Ed25519 key authentication successful"))?;
+                                auth_success = true;
+                            }
+                            Err(e) => {
+                                println!("DEBUG: Ed25519 Method 1 failed: {}", e);
+                                println!("DEBUG: Session authenticated after failure: {}", session.authenticated());
+                                
+                                // Method 2: Try with empty string passphrase
+                                println!("DEBUG: Method 2 - Ed25519 with empty string passphrase");
+                                match session.userauth_pubkey_file(&app_session.username, None, Path::new(&expanded_path), Some("")) {
+                                    Ok(_) => {
+                                        println!("DEBUG: Ed25519 authentication successful with empty passphrase!");
+                                        println!("DEBUG: Session authenticated after success: {}", session.authenticated());
+                                        self.emit_status(&session_id, "connecting", Some("✅ Ed25519 key authentication successful"))?;
+                                        auth_success = true;
+                                    }
+                                    Err(e2) => {
+                                        println!("DEBUG: Ed25519 Method 2 failed: {}", e2);
+                                        println!("DEBUG: Session authenticated after failure: {}", session.authenticated());
+                                        self.emit_status(&session_id, "connecting", Some(&format!("❌ Ed25519 key failed: {}", e)))?;
+                                    }
+                                }
+                            }
+                        }
                     } else {
-                        self.emit_status(&session_id, "connecting", Some("❌ Primary key authentication failed"))?;
+                        // Standard RSA/ECDSA key handling
+                        println!("DEBUG: Standard key type, using normal authentication");
+                        
+                        // Check if corresponding public key exists
+                        let pub_key_path = format!("{}.pub", expanded_path);
+                        println!("DEBUG: Checking for public key: {}", pub_key_path);
+                        let pub_key_exists = std::path::Path::new(&pub_key_path).exists();
+                        if pub_key_exists {
+                            println!("DEBUG: Public key found: {}", pub_key_path);
+                        } else {
+                            println!("DEBUG: Public key NOT found: {}", pub_key_path);
+                        }
+                        
+                        // Try to read the private key content to check format
+                        match std::fs::read_to_string(&expanded_path) {
+                            Ok(key_content) => {
+                                let lines: Vec<&str> = key_content.lines().collect();
+                                println!("DEBUG: Private key has {} lines", lines.len());
+                                if let Some(first_line) = lines.first() {
+                                    println!("DEBUG: Key starts with: {}", first_line);
+                                }
+                                if let Some(last_line) = lines.last() {
+                                    println!("DEBUG: Key ends with: {}", last_line);
+                                }
+                            }
+                            Err(e) => {
+                                println!("DEBUG: Failed to read private key: {}", e);
+                            }
+                        }
+                        
+                        println!("DEBUG: Session authenticated before attempt: {}", session.authenticated());
+                        
+                        // Try different authentication methods
+                        
+                        // Method 1: Try with public key file if available
+                        if pub_key_exists {
+                            match session.userauth_pubkey_file(&app_session.username, Some(Path::new(&pub_key_path)), Path::new(&expanded_path), None) {
+                                Ok(_) => {
+                                    println!("DEBUG: Public key file authentication successful!");
+                                    println!("DEBUG: Session authenticated after success: {}", session.authenticated());
+                                    self.emit_status(&session_id, "connecting", Some("✅ Public key file authentication successful"))?;
+                                    auth_success = true;
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: Public key file authentication failed: {}", e);
+                                    println!("DEBUG: Session authenticated after failure: {}", session.authenticated());
+                                }
+                            }
+                        }
+                        
+                        // Method 2: Try without public key file (let SSH2 derive it)
+                        if !auth_success {
+                            match session.userauth_pubkey_file(&app_session.username, None, Path::new(&expanded_path), None) {
+                                Ok(_) => {
+                                    println!("DEBUG: Private key only authentication successful!");
+                                    println!("DEBUG: Session authenticated after success: {}", session.authenticated());
+                                    self.emit_status(&session_id, "connecting", Some("✅ Private key only authentication successful"))?;
+                                    auth_success = true;
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: Private key only authentication failed: {}", e);
+                                    println!("DEBUG: Session authenticated after failure: {}", session.authenticated());
+                                }
+                            }
+                        }
+                        
+                        // Method 3: Try with empty passphrase explicitly
+                        if !auth_success {
+                            match session.userauth_pubkey_file(&app_session.username, None, Path::new(&expanded_path), Some("")) {
+                                Ok(_) => {
+                                    println!("DEBUG: Empty passphrase authentication successful!");
+                                    println!("DEBUG: Session authenticated after success: {}", session.authenticated());
+                                    self.emit_status(&session_id, "connecting", Some("✅ Empty passphrase authentication successful"))?;
+                                    auth_success = true;
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: Empty passphrase authentication failed: {}", e);
+                                    println!("DEBUG: Session authenticated after failure: {}", session.authenticated());
+                                }
+                            }
+                        }
                     }
                 } else {
+                    println!("DEBUG: Primary key file not found: {}", expanded_path);
                     self.emit_status(&session_id, "connecting", Some(&format!("❌ Primary key file not found: {}", expanded_path)))?;
                 }
                 
-                // If specified key fails, try common key locations as fallback
+                // If specified key fails, try SSH agent authentication first
                 if !auth_success {
+                    // Try SSH agent authentication as fallback
+                    println!("DEBUG: Attempting SSH agent authentication");
+                    match session.userauth_agent(&app_session.username) {
+                        Ok(_) => {
+                            println!("DEBUG: SSH agent authentication successful!");
+                            println!("DEBUG: Session authenticated after agent success: {}", session.authenticated());
+                            self.emit_status(&session_id, "connecting", Some("✅ SSH agent authentication successful"))?;
+                            auth_success = true;
+                        }
+                        Err(e) => {
+                            println!("DEBUG: SSH agent authentication failed: {}", e);
+                            println!("DEBUG: Session authenticated after agent failure: {}", session.authenticated());
+                        }
+                    }
+                }
+                
+                // If specified key and agent fail, try common key locations as fallback
+                if !auth_success {
+                    println!("DEBUG: Primary key failed, trying fallback keys");
                     self.emit_status(&session_id, "connecting", Some("🔄 Trying fallback SSH keys"))?;
-                    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+                    let home = get_home_directory();
+                    
+                    // Prioritize id_rsa first since it worked in manual testing
+                    #[cfg(target_os = "windows")]
                     let common_keys = vec![
-                        format!("{}/.ssh/id_ed25519", home),
+                        format!("{}\\.ssh\\id_rsa", home),
+                        format!("{}\\.ssh\\id_ecdsa", home), 
+                        format!("{}\\.ssh\\id_ed25519", home),
+                    ];
+                    #[cfg(not(target_os = "windows"))]
+                    let common_keys = vec![
                         format!("{}/.ssh/id_rsa", home),
                         format!("{}/.ssh/id_ecdsa", home),
+                        format!("{}/.ssh/id_ed25519", home),
                     ];
                     
                     for fallback_key in common_keys {
+                        println!("DEBUG: Checking fallback key: {}", fallback_key);
                         if std::path::Path::new(&fallback_key).exists() {
-                            self.emit_status(&session_id, "connecting", Some(&format!("🔑 Trying fallback key: {}", fallback_key.split('/').last().unwrap_or("unknown"))))?;
-                            if let Ok(_) = session.userauth_pubkey_file(&app_session.username, None, Path::new(&fallback_key), None) {
-                                self.emit_status(&session_id, "connecting", Some(&format!("✅ Fallback key authentication successful: {}", fallback_key.split('/').last().unwrap_or("unknown"))))?;
-                                auth_success = true;
-                                break;
-                            } else {
-                                self.emit_status(&session_id, "connecting", Some(&format!("❌ Fallback key failed: {}", fallback_key.split('/').last().unwrap_or("unknown"))))?;
+                            let key_name = get_filename_from_path(&fallback_key);
+                            println!("DEBUG: Found fallback key: {}", key_name);
+                            self.emit_status(&session_id, "connecting", Some(&format!("🔑 Trying fallback key: {}", key_name)))?;
+                            
+                            println!("DEBUG: Session authenticated before fallback attempt: {}", session.authenticated());
+                            match session.userauth_pubkey_file(&app_session.username, None, Path::new(&fallback_key), None) {
+                                Ok(_) => {
+                                    println!("DEBUG: Fallback key {} authentication successful!", key_name);
+                                    println!("DEBUG: Session authenticated after success: {}", session.authenticated());
+                                    self.emit_status(&session_id, "connecting", Some(&format!("✅ Fallback key authentication successful: {}", key_name)))?;
+                                    auth_success = true;
+                                    break;
+                                }
+                                Err(e) => {
+                                    println!("DEBUG: Fallback key {} failed: {}", key_name, e);
+                                    println!("DEBUG: Session authenticated after failure: {}", session.authenticated());
+                                    self.emit_status(&session_id, "connecting", Some(&format!("❌ Fallback key failed: {}", key_name)))?;
+                                }
                             }
                         } else {
-                            self.emit_status(&session_id, "connecting", Some(&format!("⚠️ Fallback key not found: {}", fallback_key.split('/').last().unwrap_or("unknown"))))?;
+                            println!("DEBUG: Fallback key not found: {}", fallback_key);
+                            self.emit_status(&session_id, "connecting", Some(&format!("⚠️ Fallback key not found: {}", get_filename_from_path(&fallback_key))))?;
                         }
                     }
                 }
                 
                 if !auth_success {
-                    return Err(anyhow!("Public key authentication failed. Tried:\n1. Specified key: {}\n2. Fallback keys: ~/.ssh/id_ed25519, ~/.ssh/id_rsa, ~/.ssh/id_ecdsa\n\nPlease check:\n1. Key files exist and have correct permissions (600)\n2. Key is in correct format\n3. Key matches server's authorized_keys", expanded_path));
+                    #[cfg(target_os = "windows")]
+                    let fallback_paths = format!("{}\\.ssh\\id_rsa, {}\\.ssh\\id_ecdsa, {}\\.ssh\\id_ed25519", 
+                        get_home_directory(), get_home_directory(), get_home_directory());
+                    #[cfg(not(target_os = "windows"))]
+                    let fallback_paths = "~/.ssh/id_rsa, ~/.ssh/id_ecdsa, ~/.ssh/id_ed25519".to_string();
+                    
+                    return Err(anyhow!("Public key authentication failed. Tried:\n1. Specified key: {}\n2. Fallback keys: {}\n\nPlease check:\n1. Key files exist and have correct permissions (600)\n2. Key is in correct format\n3. Key matches server's authorized_keys\n\nDebugging info: Check console for detailed SSH2 messages", expanded_path, fallback_paths));
                 }
             }
             AuthMethod::Agent => {

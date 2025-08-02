@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
-import { useSessionsStore, type Session, type Protocol } from '../stores/sessions'
+import { ref, reactive, onMounted } from 'vue'
+import { useSessionsStore, type Protocol, type Session } from '../stores/sessions'
+import { invoke } from '@tauri-apps/api/core'
+
+interface Props {
+  editingSession?: Session
+}
 
 interface Emits {
   (e: 'close'): void
 }
 
+const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 const sessionsStore = useSessionsStore()
 
@@ -16,12 +22,56 @@ const formData = reactive({
   username: '',
   protocol: 'SSH' as Protocol,
   authMethod: 'PublicKey' as 'Password' | 'PublicKey' | 'Agent',
-  keyPath: '~/.ssh/id_rsa',
+  keyPath: '',
   password: ''
 })
 
 const isSubmitting = ref(false)
 const errors = ref<Record<string, string>>({})
+const isEditing = ref(false)
+
+// Set default SSH key path based on platform
+const getDefaultKeyPath = () => {
+  // Check if we're on Windows by looking at the navigator platform
+  const isWindows = navigator.platform.toLowerCase().includes('win')
+  return isWindows ? '%USERPROFILE%\\.ssh\\id_ed25519' : '~/.ssh/id_ed25519'
+}
+
+// Initialize form data when editing
+onMounted(() => {
+  if (props.editingSession) {
+    isEditing.value = true
+    formData.name = props.editingSession.name
+    formData.host = props.editingSession.host
+    formData.port = props.editingSession.port
+    formData.username = props.editingSession.username
+    formData.protocol = props.editingSession.protocol
+    
+    // Handle auth method
+    if (props.editingSession.auth_method === 'Password') {
+      formData.authMethod = 'Password'
+    } else if (props.editingSession.auth_method === 'Agent') {
+      formData.authMethod = 'Agent'
+    } else if (typeof props.editingSession.auth_method === 'object' && 'PublicKey' in props.editingSession.auth_method) {
+      formData.authMethod = 'PublicKey'
+      formData.keyPath = props.editingSession.auth_method.PublicKey.key_path
+    }
+  } else {
+    // Set default key path for new sessions
+    formData.keyPath = getDefaultKeyPath()
+  }
+})
+
+async function browseSSHKey() {
+  try {
+    const result = await invoke<string | null>('browse_ssh_key')
+    if (result) {
+      formData.keyPath = result
+    }
+  } catch (error) {
+    console.error('Failed to browse SSH key:', error)
+  }
+}
 
 function validateForm() {
   errors.value = {}
@@ -70,22 +120,44 @@ async function handleSubmit() {
         : { PublicKey: { key_path: formData.keyPath } }
     }
     
-    console.log('Creating session with data:', sessionData)
+    if (isEditing.value && props.editingSession) {
+      // Update existing session
+      console.log('Updating session with data:', sessionData)
+      const updatedSession = {
+        ...props.editingSession,
+        ...sessionData,
+        last_used: props.editingSession.last_used // Preserve last_used timestamp
+      }
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Session update timed out')), 10000)
+      })
+      
+      await Promise.race([
+        sessionsStore.updateSession(updatedSession),
+        timeoutPromise
+      ])
+      
+      console.log('Session updated successfully')
+    } else {
+      // Create new session
+      console.log('Creating session with data:', sessionData)
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Session creation timed out')), 10000)
+      })
+      
+      await Promise.race([
+        sessionsStore.createSession(sessionData),
+        timeoutPromise
+      ])
+      
+      console.log('Session created successfully')
+    }
     
-    // Add a timeout to prevent hanging
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Session creation timed out')), 10000)
-    })
-    
-    await Promise.race([
-      sessionsStore.createSession(sessionData),
-      timeoutPromise
-    ])
-    
-    console.log('Session created successfully')
     emit('close')
   } catch (error) {
-    console.error('Failed to create session:', error)
+    console.error('Failed to save session:', error)
     // Show the error to the user
     errors.value.general = error instanceof Error ? error.message : String(error)
   } finally {
@@ -108,7 +180,7 @@ function handleOverlayClick(event: MouseEvent) {
   <div class="modal-overlay" @click="handleOverlayClick">
     <div class="modal-container">
       <div class="modal-header">
-        <h2 class="modal-title">Create New Session</h2>
+        <h2 class="modal-title">{{ isEditing ? 'Edit Session' : 'Create New Session' }}</h2>
         <button class="modal-close" @click="handleCancel">
           ✕
         </button>
@@ -229,14 +301,24 @@ function handleOverlayClick(event: MouseEvent) {
 
         <div v-if="formData.authMethod === 'PublicKey'" class="form-group">
           <label for="keyPath" class="form-label">SSH Key Path</label>
-          <input
-            id="keyPath"
-            v-model="formData.keyPath"
-            type="text"
-            class="form-input"
-            :class="{ error: errors.keyPath }"
-            placeholder="~/.ssh/id_rsa"
-          />
+          <div class="input-with-button">
+            <input
+              id="keyPath"
+              v-model="formData.keyPath"
+              type="text"
+              class="form-input"
+              :class="{ error: errors.keyPath }"
+              placeholder="Select or enter SSH key path..."
+            />
+            <button
+              type="button"
+              @click="browseSSHKey"
+              class="btn btn-browse"
+              title="Browse for SSH key file"
+            >
+              Browse
+            </button>
+          </div>
           <div v-if="errors.keyPath" class="form-error">{{ errors.keyPath }}</div>
           <div class="form-help">
             Path to your private SSH key file
@@ -257,8 +339,8 @@ function handleOverlayClick(event: MouseEvent) {
             class="btn btn-primary"
             :disabled="isSubmitting"
           >
-            <span v-if="isSubmitting">Creating...</span>
-            <span v-else>Create Session</span>
+            <span v-if="isSubmitting">{{ isEditing ? 'Updating...' : 'Creating...' }}</span>
+            <span v-else>{{ isEditing ? 'Update Session' : 'Create Session' }}</span>
           </button>
         </div>
       </form>
@@ -375,6 +457,32 @@ function handleOverlayClick(event: MouseEvent) {
   color: var(--text-secondary);
   font-size: 0.75rem;
   margin-top: 0.25rem;
+}
+
+.input-with-button {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.input-with-button .form-input {
+  flex: 1;
+}
+
+.btn-browse {
+  padding: 0.75rem 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 0.375rem;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-browse:hover {
+  background: var(--bg-accent);
+  border-color: var(--text-accent);
 }
 
 .general-error {

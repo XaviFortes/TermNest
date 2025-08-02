@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useSessionsStore } from '../stores/sessions'
+import { useSessionsStore, type Session } from '../stores/sessions'
 import SessionCard from './SessionCard.vue'
 import CreateSessionModal from './CreateSessionModal.vue'
 import Terminal from './Terminal.vue'
@@ -8,6 +8,8 @@ import Terminal from './Terminal.vue'
 const sessionsStore = useSessionsStore()
 
 const showCreateModal = ref(false)
+const showEditModal = ref(false)
+const editingSession = ref<Session | null>(null)
 const searchQuery = ref('')
 
 const filteredSessions = computed(() => {
@@ -31,6 +33,18 @@ function openCreateModal() {
 function closeCreateModal() {
   console.log('SessionManager: Closing create modal')
   showCreateModal.value = false
+}
+
+function openEditModal(session: Session) {
+  console.log('SessionManager: Opening edit modal for session:', session)
+  editingSession.value = session
+  showEditModal.value = true
+}
+
+function closeEditModal() {
+  console.log('SessionManager: Closing edit modal')
+  showEditModal.value = false
+  editingSession.value = null
 }
 
 function backToSessions() {
@@ -87,6 +101,7 @@ function backToSessions() {
           v-for="session in filteredSessions"
           :key="session.id"
           :session="session"
+          @edit-session="openEditModal"
         />
       </div>
 
@@ -120,6 +135,13 @@ function backToSessions() {
     <CreateSessionModal
       v-if="showCreateModal"
       @close="closeCreateModal"
+    />
+
+    <!-- Edit Session Modal -->
+    <CreateSessionModal
+      v-if="showEditModal && editingSession"
+      :editing-session="editingSession"
+      @close="closeEditModal"
     />
   </div>
 </template>

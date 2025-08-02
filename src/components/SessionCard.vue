@@ -6,7 +6,12 @@ interface Props {
   session: Session
 }
 
+interface Emits {
+  (e: 'edit-session', session: Session): void
+}
+
 const props = defineProps<Props>()
+const emit = defineEmits<Emits>()
 const sessionsStore = useSessionsStore()
 
 const connectionStatus = computed(() => {
@@ -56,6 +61,20 @@ async function disconnect() {
     await sessionsStore.disconnectSession(props.session.id)
   } catch (error) {
     console.error('Failed to disconnect:', error)
+  }
+}
+
+function editSession() {
+  emit('edit-session', props.session)
+}
+
+async function deleteSession() {
+  if (confirm(`Are you sure you want to delete the session "${props.session.name}"?`)) {
+    try {
+      await sessionsStore.deleteSession(props.session.id)
+    } catch (error) {
+      console.error('Failed to delete session:', error)
+    }
   }
 }
 
@@ -140,13 +159,13 @@ function formatDate(dateString: string) {
       </button>
 
       <div class="action-menu">
-        <button class="btn btn-secondary btn-sm">
+        <button class="btn btn-secondary btn-sm" title="Settings">
           <span>⚙️</span>
         </button>
-        <button class="btn btn-secondary btn-sm">
+        <button class="btn btn-secondary btn-sm" @click="editSession" title="Edit Session">
           <span>📝</span>
         </button>
-        <button class="btn btn-secondary btn-sm">
+        <button class="btn btn-secondary btn-sm" @click="deleteSession" title="Delete Session">
           <span>🗑️</span>
         </button>
       </div>

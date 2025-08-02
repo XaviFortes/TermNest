@@ -117,6 +117,22 @@ async fn save_sessions_to_store(app: AppHandle, state: State<'_, AppState>) -> R
     Ok(())
 }
 
+fn get_default_ssh_key_path() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            format!("{}\\.ssh\\id_rsa", userprofile)
+        } else {
+            "%USERPROFILE%\\.ssh\\id_rsa".to_string()
+        }
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        "~/.ssh/id_rsa".to_string()
+    }
+}
+
 #[tauri::command]
 async fn create_session(
     state: State<'_, AppState>,
@@ -130,6 +146,9 @@ async fn create_session(
     // Generate a unique session ID
     let session_id = Uuid::new_v4().to_string();
     
+    // Get default SSH key path based on platform
+    let default_key_path = get_default_ssh_key_path();
+    
     let session = Session {
         id: session_id.clone(),
         name,
@@ -137,7 +156,7 @@ async fn create_session(
         port,
         username,
         protocol,
-        auth_method: AuthMethod::PublicKey { key_path: "~/.ssh/id_ed25519".to_string() },
+        auth_method: AuthMethod::PublicKey { key_path: default_key_path },
         created_at: chrono::Utc::now().to_rfc3339(),
         last_used: None,
     };
@@ -156,13 +175,12 @@ async fn create_session(
 async fn update_session(
     state: State<'_, AppState>,
     app: AppHandle,
-    #[allow(non_snake_case)] sessionId: String,
     session: Session,
 ) -> Result<Session, String> {
     // Update session and drop guard before await
     {
         let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-        sessions.insert(sessionId, session.clone());
+        sessions.insert(session.id.clone(), session.clone());
     }
 
     save_sessions_to_store(app, state).await?;
@@ -239,6 +257,22 @@ async fn send_terminal_input(
 }
 
 #[tauri::command]
+async fn browse_ssh_key(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    
+    let file_path = app.dialog().file()
+        .set_title("Select SSH Private Key")
+        .add_filter("SSH Keys", &["*"])
+        .add_filter("All Files", &["*"])
+        .blocking_pick_file();
+    
+    match file_path {
+        Some(path) => Ok(Some(path.to_string())),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
 async fn list_remote_directory(
     state: State<'_, AppState>,
     #[allow(non_snake_case)] sessionId: String,
@@ -251,6 +285,7 @@ async fn list_remote_directory(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
             app.manage(AppState::new(app_handle));
@@ -266,7 +301,8 @@ pub fn run() {
             connect_ssh,
             disconnect_session,
             send_terminal_input,
-            list_remote_directory
+            list_remote_directory,
+            browse_ssh_key
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

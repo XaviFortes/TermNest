@@ -303,14 +303,16 @@ function setupTerminal() {
   
   // Handle user input
   terminal.onData((data) => {
-    // Send input to SSH backend
+    // 1) Locally echo, so user sees input instantly:
+    terminal.write(data)
+    const normalized = data === '\r' ? '\n' : data; 
+    // 2) Forward keystrokes to SSH backend:
     invoke('send_terminal_input', {
       sessionId: props.sessionId,
-      input: data
-    }).catch(error => {
-      console.error('Failed to send input:', error)
-    })
+      input: normalized
+    }).catch(console.error)
   })
+
   
   // Handle resize
   const resizeObserver = new ResizeObserver(() => {

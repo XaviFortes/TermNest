@@ -461,16 +461,16 @@ impl SshManager {
         tokio::time::sleep(Duration::from_millis(100)).await;
         
         // Send a command to set up proper terminal echo and line discipline
-        {
-            if let Ok(mut channel_guard) = ssh_connection.channel.lock() {
-                if let Some(ref mut ch) = *channel_guard {
-                    // Send stty settings to ensure proper echo behavior
-                    let setup_cmd = "stty echo icanon icrnl\n";
-                    let _ = ch.write_all(setup_cmd.as_bytes());
-                    let _ = ch.flush();
-                }
-            }
-        }
+        // {
+            // if let Ok(mut channel_guard) = ssh_connection.channel.lock() {
+                // if let Some(ref mut ch) = *channel_guard {
+                    //  // Send stty settings to ensure proper echo behavior
+                    // let setup_cmd = "stty echo icanon icrnl\n";
+                    // let _ = ch.write_all(setup_cmd.as_bytes());
+                    // let _ = ch.flush();
+                // }
+            // }
+        // }
         
         // Wait a bit and send a newline to get the initial prompt
         tokio::time::sleep(Duration::from_millis(200)).await;

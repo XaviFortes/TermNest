@@ -57,10 +57,20 @@ async function connect() {
 }
 
 async function disconnect() {
+  console.log('SessionCard: Disconnecting session:', props.session.id)
+  console.log('SessionCard: Current connection status before disconnect:', connectionStatus.value)
   try {
     await sessionsStore.disconnectSession(props.session.id)
+    console.log('SessionCard: Disconnect completed')
+    
+    // Check status after a small delay to see if reactive update happened
+    setTimeout(() => {
+      console.log('SessionCard: Connection status after disconnect (delayed check):', connectionStatus.value)
+      console.log('SessionCard: isConnected computed:', isConnected.value)
+      console.log('SessionCard: isConnecting computed:', isConnecting.value)
+    }, 100)
   } catch (error) {
-    console.error('Failed to disconnect:', error)
+    console.error('SessionCard: Failed to disconnect:', error)
   }
 }
 

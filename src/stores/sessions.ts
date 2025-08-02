@@ -174,8 +174,26 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function disconnectSession(sessionId: string) {
     try {
+      console.log('Store: Disconnecting session:', sessionId)
+      console.log('Store: Current connection status before:', activeConnections.value.get(sessionId))
+      
       await invoke('disconnect_session', { sessionId })
+      console.log('Store: Backend disconnect call completed')
+      
+      // Manually update the connection status to ensure UI updates
+      const newStatus = {
+        session_id: sessionId,
+        status: 'disconnected',
+        message: 'Disconnected'
+      }
+      
+      console.log('Store: Updating connection status to:', newStatus)
+      updateConnectionStatus(newStatus)
+      
+      console.log('Store: Connection status after update:', activeConnections.value.get(sessionId))
+      console.log('Store: Session disconnected successfully:', sessionId)
     } catch (err) {
+      console.error('Store: Failed to disconnect session:', err)
       error.value = err as string
       throw err
     }

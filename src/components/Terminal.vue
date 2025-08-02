@@ -406,7 +406,21 @@ async function deleteFile(file: FileItem) {
 }
 
 function disconnect() {
+  console.log('Disconnecting session:', props.sessionId)
+  
+  // Disconnect from SSH backend
+  invoke('disconnect_session', { sessionId: props.sessionId })
+    .then(() => {
+      console.log('Session disconnected successfully')
+    })
+    .catch((error) => {
+      console.error('Failed to disconnect session:', error)
+    })
+  
+  // Update local state
   connectionStatus.value = 'disconnected'
+  
+  // Close the session and go back to sessions list
   sessionsStore.closeSession()
 }
 </script>

@@ -203,7 +203,7 @@ html, body {
 .app-main {
   flex: 1;
   overflow: hidden;
-  padding: 1rem;
+  min-height: 0; /* Important for flex child to shrink */
 }
 
 /* Footer */

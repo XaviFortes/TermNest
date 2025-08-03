@@ -148,14 +148,15 @@ function backToSessions() {
 
 <style scoped>
 .session-manager {
-  height: 100vh;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  overflow: hidden;
 }
 
 /* Terminal View Styles */
 .terminal-view {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -201,9 +202,11 @@ function backToSessions() {
 
 /* Sessions View Styles */
 .sessions-view {
-  height: 100vh;
+  height: 100%;
   padding: 1.5rem;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .manager-header {
@@ -212,6 +215,7 @@ function backToSessions() {
   align-items: center;
   margin-bottom: 2rem;
   gap: 1rem;
+  flex-shrink: 0; /* Prevent header from shrinking */
 }
 
 .header-left {
@@ -326,6 +330,9 @@ function backToSessions() {
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
   gap: 1.5rem;
   animation: fadeInUp 0.6s ease-out;
+  flex: 1; /* Allow grid to grow and shrink */
+  overflow-y: auto; /* Enable scrolling within the grid */
+  min-height: 0; /* Important for flex child */
 }
 
 .empty-state,

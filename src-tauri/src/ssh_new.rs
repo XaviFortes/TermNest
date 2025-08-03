@@ -16,7 +16,14 @@ pub struct SshConfig {
     pub host: String,
     pub port: u16,
     pub username: String,
-    pub private_key_path: String,
+    pub auth_method: AuthMethod,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AuthMethod {
+    Password { password: String },
+    PublicKey { private_key_path: String },
+    Agent,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -204,9 +211,38 @@ impl SshManager {
         session.set_tcp_stream(tcp_stream);
         session.handshake()?;
         
-        // Authenticate with private key
-        let private_key_path = std::path::Path::new(&config.private_key_path);
-        session.userauth_pubkey_file(&config.username, None, private_key_path, None)?;
+        // Authenticate based on auth method
+        match &config.auth_method {
+            AuthMethod::Password { password } => {
+                println!("Authenticating with password for user: {}", config.username);
+                session.userauth_password(&config.username, password)?;
+            }
+            AuthMethod::PublicKey { private_key_path } => {
+                println!("Authenticating with public key: {}", private_key_path);
+                let private_key_path = std::path::Path::new(private_key_path);
+                session.userauth_pubkey_file(&config.username, None, private_key_path, None)?;
+            }
+            AuthMethod::Agent => {
+                println!("Authenticating with SSH agent for user: {}", config.username);
+                let mut agent = session.agent()?;
+                agent.connect()?;
+                agent.list_identities()?;
+                
+                let identities = agent.identities()?;
+                let mut authenticated = false;
+                
+                for identity in identities {
+                    if agent.userauth(&config.username, &identity).is_ok() {
+                        authenticated = true;
+                        break;
+                    }
+                }
+                
+                if !authenticated {
+                    return Err(anyhow!("SSH agent authentication failed - no suitable identity found"));
+                }
+            }
+        }
         
         if !session.authenticated() {
             return Err(anyhow!("SSH authentication failed"));
@@ -276,6 +312,22 @@ pub async fn ssh_connect(
     app_handle: AppHandle,
     state: tauri::State<'_, Arc<SshManager>>,
 ) -> Result<(), String> {
+    state
+        .connect(session_id, config, app_handle)
+        .map_err(|e| format!("Connection failed: {}", e))
+}
+
+#[tauri::command]
+pub async fn ssh_connect_with_password(
+    session_id: String,
+    mut config: SshConfig,
+    password: String,
+    app_handle: AppHandle,
+    state: tauri::State<'_, Arc<SshManager>>,
+) -> Result<(), String> {
+    // Update config with password
+    config.auth_method = AuthMethod::Password { password };
+    
     state
         .connect(session_id, config, app_handle)
         .map_err(|e| format!("Connection failed: {}", e))

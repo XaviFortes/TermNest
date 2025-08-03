@@ -229,9 +229,10 @@ async fn connect_ssh(
         host: session.host,
         port: session.port,
         username: session.username,
-        private_key_path: match session.auth_method {
-            AuthMethod::PublicKey { key_path } => key_path,
-            _ => return Err("Only public key authentication is currently supported".to_string()),
+        auth_method: match session.auth_method {
+            AuthMethod::Password => ssh_new::AuthMethod::Password { password: String::new() },
+            AuthMethod::PublicKey { key_path } => ssh_new::AuthMethod::PublicKey { private_key_path: key_path },
+            AuthMethod::Agent => ssh_new::AuthMethod::Agent,
         },
     };
 
@@ -352,6 +353,7 @@ pub fn run() {
             list_remote_directory,
             browse_ssh_key,
             ssh_new::ssh_connect,
+            ssh_new::ssh_connect_with_password,
             ssh_new::ssh_send_input,
             ssh_new::ssh_disconnect,
             ssh_new::ssh_list_sessions

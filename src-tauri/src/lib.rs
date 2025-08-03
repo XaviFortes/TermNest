@@ -298,9 +298,9 @@ async fn browse_ssh_key(app: AppHandle) -> Result<Option<String>, String> {
     };
     
     let mut dialog = app.dialog().file()
-        .set_title("Select SSH Private Key")
-        .add_filter("SSH Private Keys", &["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"])
-        .add_filter("All Files", &["*"]);
+        .set_title("Select SSH Private Key");
+        // .add_filter("SSH Private Keys", &["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"])
+        // .add_filter("All Files", &["*"]);
     
     // Set initial directory to .ssh folder if it exists
     if !default_ssh_dir.is_empty() && std::path::Path::new(&default_ssh_dir).exists() {

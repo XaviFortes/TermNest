@@ -170,6 +170,28 @@ function backToSessions() {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.terminal-header .btn-secondary {
+  background: rgba(108, 117, 125, 0.9);
+  border: 1px solid rgba(173, 181, 189, 0.5);
+  color: #ffffff;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(5px);
+}
+
+.terminal-header .btn-secondary:hover {
+  background: rgba(108, 117, 125, 1);
+  border-color: rgba(173, 181, 189, 0.8);
+  transform: translateX(-2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.terminal-header .btn-secondary:active {
+  transform: translateX(-1px);
+}
+
 .terminal-header h3 {
   color: white;
   margin: 0;

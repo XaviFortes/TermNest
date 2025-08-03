@@ -41,6 +41,7 @@ pub struct SshConnection {
     pub channel: Arc<Mutex<Option<Channel>>>,
     pub sftp: Arc<Mutex<Option<Sftp>>>,
     pub app_session: AppSession,
+    pub reader_started: Arc<Mutex<bool>>,
 }
 
 #[derive(Clone)]
@@ -416,6 +417,12 @@ impl SshManager {
             .map_err(|e| anyhow!("Failed to request PTY: {}", e))?;
         self.emit_status(&session_id, "connecting", Some("✅ PTY allocated"))?;
 
+        // Set environment variables for proper terminal behavior
+        self.emit_status(&session_id, "connecting", Some("🌐 Setting up terminal environment"))?;
+        let _ = channel.setenv("TERM", "xterm-256color");
+        let _ = channel.setenv("LC_ALL", "en_US.UTF-8");
+        let _ = channel.setenv("LANG", "en_US.UTF-8");
+        
         // Start shell
         self.emit_status(&session_id, "connecting", Some("🐚 Starting remote shell"))?;
         channel.shell().map_err(|e| anyhow!("Failed to start shell: {}", e))?;
@@ -442,6 +449,7 @@ impl SshManager {
             channel: Arc::new(Mutex::new(Some(channel))),
             sftp: Arc::new(Mutex::new(sftp)),
             app_session: app_session.clone(),
+            reader_started: Arc::new(Mutex::new(false)),
         };
 
         {
@@ -449,52 +457,100 @@ impl SshManager {
             connections.insert(session_id.clone(), ssh_connection.clone());
         }
 
+        // Send initial setup commands to ensure proper terminal behavior
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
+        // Send a command to set up proper terminal echo and line discipline
+        // {
+            // if let Ok(mut channel_guard) = ssh_connection.channel.lock() {
+                // if let Some(ref mut ch) = *channel_guard {
+                    //  // Send stty settings to ensure proper echo behavior
+                    // let setup_cmd = "stty echo icanon icrnl\n";
+                    // let _ = ch.write_all(setup_cmd.as_bytes());
+                    // let _ = ch.flush();
+                // }
+            // }
+        // }
+        
+        // Wait a bit and send a newline to get the initial prompt
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        {
+            if let Ok(mut channel_guard) = ssh_connection.channel.lock() {
+                if let Some(ref mut ch) = *channel_guard {
+                    let _ = ch.write_all(b"\n");
+                    let _ = ch.flush();
+                }
+            }
+        }
+
         self.emit_status(&session_id, "connecting", Some("✅ Connection stored successfully"))?;
 
         // Start terminal reader after initial setup
         let ssh_connection_for_init = ssh_connection.clone();
         let app_handle_clone = self.app_handle.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-            
-            // Start terminal reader after initial setup
-            let session_id_clone = ssh_connection_for_init.session_id.clone();
-            tokio::spawn(async move {
-                let mut buffer = [0u8; 4096];
-                loop {
-                    let read_result = tokio::task::spawn_blocking({
-                        let connection_clone = ssh_connection_for_init.clone();
-                        move || {
-                            if let Ok(mut channel_guard) = connection_clone.channel.lock() {
-                                if let Some(ref mut channel) = *channel_guard {
-                                    channel.read(&mut buffer).map(|n| (n, buffer))
+        
+        // Check if reader is already started
+        {
+            let mut reader_started = ssh_connection_for_init.reader_started.lock().unwrap();
+            if *reader_started {
+                println!("DEBUG: Terminal reader already started for session {}", session_id);
+            } else {
+                *reader_started = true;
+                println!("DEBUG: Starting NEW terminal reader for session {}", session_id);
+                
+                let connection_for_reader = ssh_connection_for_init.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                    
+                    // Start terminal reader after initial setup
+                    let session_id_clone = connection_for_reader.session_id.clone();
+                    let mut buffer = [0u8; 4096];
+                    println!("DEBUG: Terminal reader loop started for session {}", session_id_clone);
+                    loop {
+                        let read_result = tokio::task::spawn_blocking({
+                            let connection_clone = connection_for_reader.clone();
+                            move || {
+                                if let Ok(mut channel_guard) = connection_clone.channel.lock() {
+                                    if let Some(ref mut channel) = *channel_guard {
+                                        channel.read(&mut buffer).map(|n| (n, buffer))
+                                    } else {
+                                        Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Channel closed"))
+                                    }
                                 } else {
-                                    Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Channel closed"))
+                                    Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Cannot lock channel"))
                                 }
-                            } else {
-                                Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Cannot lock channel"))
+                            }
+                        }).await;
+
+                        match read_result {
+                            Ok(Ok((0, _))) => {
+                                println!("DEBUG: EOF received for session {}", session_id_clone);
+                                break;
+                            }
+                            Ok(Ok((n, buffer))) => {
+                                let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                                println!("DEBUG: Emitting {} bytes for session {}: {:?}", n, session_id_clone, output);
+                                let _ = app_handle_clone.emit("terminal_output", serde_json::json!({
+                                    "session_id": session_id_clone,
+                                    "data": output
+                                }));
+                            }
+                            Ok(Err(e)) => {
+                                println!("DEBUG: Read error for session {}: {}", session_id_clone, e);
+                                tokio::time::sleep(Duration::from_millis(100)).await;
+                            }
+                            Err(e) => {
+                                println!("DEBUG: Task error for session {}: {}", session_id_clone, e);
+                                tokio::time::sleep(Duration::from_millis(100)).await;
                             }
                         }
-                    }).await;
-
-                    match read_result {
-                        Ok(Ok((0, _))) => break,
-                        Ok(Ok((n, buffer))) => {
-                            let output = String::from_utf8_lossy(&buffer[..n]).to_string();
-                            let _ = app_handle_clone.emit("terminal_output", serde_json::json!({
-                                "session_id": session_id_clone,
-                                "data": output
-                            }));
-                        }
-                        _ => {
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
+                        
+                        tokio::time::sleep(Duration::from_millis(50)).await;
                     }
-                    
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                }
-            });
-        });
+                    println!("DEBUG: Terminal reader exited for session {}", session_id_clone);
+                });
+            }
+        }
 
         // Emit connected status
         self.emit_status(&session_id, "connected", Some("🎉 SSH connection established successfully!"))?;
@@ -506,6 +562,11 @@ impl SshManager {
     pub async fn disconnect(&self, session_id: &str) -> Result<()> {
         let mut connections = self.connections.lock().unwrap();
         if let Some(connection) = connections.remove(session_id) {
+            // Reset reader started flag
+            if let Ok(mut reader_started) = connection.reader_started.lock() {
+                *reader_started = false;
+            }
+            
             // Close channel
             if let Ok(mut channel_guard) = connection.channel.lock() {
                 if let Some(mut channel) = channel_guard.take() {
@@ -527,19 +588,62 @@ impl SshManager {
     }
 
     pub async fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
-        let connections = self.connections.lock().unwrap();
-        if let Some(connection) = connections.get(session_id) {
-            if let Ok(mut channel_guard) = connection.channel.lock() {
-                if let Some(ref mut channel) = *channel_guard {
-                    channel.write_all(input.as_bytes())
-                        .map_err(|e| anyhow!("Failed to send input: {}", e))?;
-                    channel.flush()
-                        .map_err(|e| anyhow!("Failed to flush input: {}", e))?;
-                }
+        println!("DEBUG: send_input called for session {}: {:?}", session_id, input);
+        
+        // Step 1: Lock the connection map
+        let connections = self.connections
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock connections: {}", e))?;
+        
+        // Step 2: Fetch the connection
+        let connection = match connections.get(session_id) {
+            Some(conn) => conn.clone(),
+            None => {
+                println!("ERROR: No connection found for session {}", session_id);
+                return Err(anyhow!("No connection found for session {}", session_id));
             }
-        }
+        };
+    
+        println!("DEBUG: Connection {} found—writing {} bytes", session_id, input.len());
+    
+        // Step 3: Lock the channel
+        let mut channel_guard = match connection.channel.lock() {
+            Ok(guard) => {
+                println!("DEBUG: Channel mutex locked for session {}", session_id);
+                guard
+            }
+            Err(poison) => {
+                println!("WARNING: Channel mutex poisoned for session {}. Recovering.", session_id);
+                poison.into_inner()
+            }
+        };
+    
+        // Step 4: Make sure channel is Some
+        let channel = match channel_guard.as_mut() {
+            Some(ch) => {
+                println!("DEBUG: Got mutable reference to SSH channel for session {}", session_id);
+                ch
+            }
+            None => {
+                println!("ERROR: Channel is None (closed?) for session {}", session_id);
+                return Err(anyhow!("Channel is None (closed?) for session {}", session_id));
+            }
+        };
+    
+        // Step 5: Write to the SSH channel and flush
+        println!("DEBUG: About to write input to channel for session {}: {:?}", session_id, input.as_bytes());
+        channel
+            .write_all(input.as_bytes())
+            .map_err(|e| anyhow!("Failed to write to channel: {}", e))?;
+        channel
+            .flush()
+            .map_err(|e| anyhow!("Failed to flush channel: {}", e))?;
+    
+        println!("DEBUG: Input sent and flushed successfully for session {}", session_id);
         Ok(())
     }
+
+
 
     pub async fn list_directory(&self, session_id: &str, path: &str) -> Result<Vec<FileItem>> {
         let connections = self.connections.lock().unwrap();
@@ -609,60 +713,6 @@ impl SshManager {
         } else {
             Some(ConnectionStatus::Disconnected)
         }
-    }
-
-    fn start_terminal_reader(&self, connection: SshConnection) -> Result<()> {
-        let app_handle = self.app_handle.clone();
-        let session_id = connection.session_id.clone();
-
-        tokio::spawn(async move {
-            // Give the shell a moment to start up
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            
-            loop {
-                let connection_clone = connection.clone();
-                let session_id_clone = session_id.clone();
-                
-                // Use spawn_blocking to handle the potentially blocking read operation
-                let read_result = tokio::task::spawn_blocking(move || {
-                    let mut buffer = [0u8; 4096];
-                    if let Ok(mut channel_guard) = connection_clone.channel.lock() {
-                        if let Some(ref mut channel) = *channel_guard {
-                            channel.read(&mut buffer).map(|n| (n, buffer))
-                        } else {
-                            Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Channel closed"))
-                        }
-                    } else {
-                        Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Cannot lock channel"))
-                    }
-                }).await;
-
-                match read_result {
-                    Ok(Ok((0, _))) => break, // EOF
-                    Ok(Ok((n, buffer))) => {
-                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
-                        let _ = app_handle.emit("terminal_output", serde_json::json!({
-                            "session_id": session_id,
-                            "data": output
-                        }));
-                    }
-                    Ok(Err(e)) => {
-                        eprintln!("Error reading from channel: {}", e);
-                        // Don't break immediately, give it another chance
-                        tokio::time::sleep(Duration::from_millis(1000)).await;
-                    }
-                    Err(e) => {
-                        eprintln!("Task join error: {}", e);
-                        break;
-                    }
-                }
-                
-                // Small delay to prevent busy loop
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        });
-
-        Ok(())
     }
 
     fn emit_status(&self, session_id: &str, status: &str, message: Option<&str>) -> Result<()> {

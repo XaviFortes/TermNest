@@ -37,10 +37,13 @@ struct TerminalEvent {
 pub struct SshConnection {
     session_id: String,
     writer_tx: mpsc::UnboundedSender<Vec<u8>>,
+    input_tx: mpsc::UnboundedSender<String>,
     reader_shutdown: Arc<AtomicBool>,
     writer_shutdown: Arc<AtomicBool>,
+    input_shutdown: Arc<AtomicBool>,
     reader_handle: Option<thread::JoinHandle<()>>,
     writer_handle: Option<thread::JoinHandle<()>>,
+    input_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl SshConnection {
@@ -50,10 +53,12 @@ impl SshConnection {
         app_handle: AppHandle,
     ) -> Result<Self> {
         let (writer_tx, mut writer_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (input_tx, mut input_rx) = mpsc::unbounded_channel::<String>();
         
         let reader_shutdown = Arc::new(AtomicBool::new(false));
         let writer_shutdown = Arc::new(AtomicBool::new(false));
-        
+        let input_shutdown = Arc::new(AtomicBool::new(false));
+
         // Use Arc<Mutex<Channel>> to share the channel safely between threads
         let shared_channel = Arc::new(Mutex::new(channel));
         
@@ -138,21 +143,68 @@ impl SshConnection {
             
             println!("SSH writer thread for {} exiting", session_id_writer);
         });
+
+        // ---- Input buffering and debouncing thread ----
+        let input_writer_tx = writer_tx.clone();
+        let input_shutdown_clone = input_shutdown.clone();
+        let session_id_input = session_id.clone();
+        let input_handle = thread::spawn(move || {
+            use std::time::{Instant, Duration};
+            let mut buffer = String::new();
+            let mut last_flush = Instant::now();
+            let flush_interval = Duration::from_millis(100); // You can tune this!
+
+            loop {
+                if input_shutdown_clone.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                // Non-blocking receive: drain all available input
+                let mut received_any = false;
+                while let Ok(data) = input_rx.try_recv() {
+                    buffer.push_str(&data);
+                    received_any = true;
+                }
+
+                let now = Instant::now();
+                // Flush if interval has elapsed or there is accumulated input after waiting
+                if (!buffer.is_empty() && now.duration_since(last_flush) > flush_interval) || (received_any && buffer.len() > 1024) {
+                    // Write to the SSH writer
+                    let bytes = buffer.clone().into_bytes();
+                    if let Err(e) = input_writer_tx.send(bytes) {
+                        eprintln!("[SSH] Failed to send buffered input: {e}");
+                    }
+                    buffer.clear();
+                    last_flush = now;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            // Flush any remaining buffer on exit
+            if !buffer.is_empty() {
+                let _ = input_writer_tx.send(buffer.into_bytes());
+            }
+        });
         
         Ok(SshConnection {
             session_id,
             writer_tx,
+            input_tx,
             reader_shutdown,
             writer_shutdown,
+            input_shutdown,
             reader_handle: Some(reader_handle),
             writer_handle: Some(writer_handle),
+            input_handle: Some(input_handle),
         })
     }
     
     pub fn send_input(&self, input: &str) -> Result<()> {
-        let data = input.as_bytes().to_vec();
-        self.writer_tx.send(data)
-            .map_err(|e| anyhow!("Failed to send input: {}", e))?;
+        self.input_tx
+            .send(input.to_string())
+            .map_err(|e| anyhow!("Failed to send input for buffering: {}", e))?;
+        // let data = input.as_bytes().to_vec();
+        // self.writer_tx.send(data)
+            // .map_err(|e| anyhow!("Failed to send input: {}", e))?;
         Ok(())
     }
     
@@ -162,6 +214,7 @@ impl SshConnection {
         // Signal threads to shutdown
         self.reader_shutdown.store(true, Ordering::Relaxed);
         self.writer_shutdown.store(true, Ordering::Relaxed);
+        self.input_shutdown.store(true, Ordering::Relaxed);
         
         // Wait for threads to finish
         if let Some(handle) = self.reader_handle.take() {
@@ -173,6 +226,12 @@ impl SshConnection {
         if let Some(handle) = self.writer_handle.take() {
             if let Err(e) = handle.join() {
                 eprintln!("Writer thread join error: {:?}", e);
+            }
+        }
+
+        if let Some(handle) = self.input_handle.take() {
+            if let Err(e) = handle.join() {
+                eprintln!("Input thread join error: {:?}", e);
             }
         }
     }

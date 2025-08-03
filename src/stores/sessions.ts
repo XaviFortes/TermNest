@@ -164,6 +164,21 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   async function connectToSession(sessionId: string) {
     try {
+      const session = sessions.value.find(s => s.id === sessionId)
+      if (!session) {
+        throw new Error('Session not found')
+      }
+      
+      console.log('SessionStore: connectToSession called for:', sessionId, 'Auth method:', session.auth_method)
+      
+      // For password authentication, don't connect here - let Terminal component handle it
+      if (session.auth_method === 'Password') {
+        console.log('Password authentication detected - connection will be handled by Terminal component')
+        return
+      }
+      
+      // For non-password auth, use the old connection method
+      console.log('Using old connection method for non-password auth')
       const result = await invoke<string>('connect_ssh', { sessionId })
       console.log('Connection result:', result)
     } catch (err) {

@@ -93,6 +93,17 @@
         </div>
       </div>
     </div>
+    
+    <!-- Password Dialog -->
+    <PasswordDialog
+      v-if="showPasswordDialog && pendingSessionConfig"
+      :host="pendingSessionConfig.host"
+      :username="pendingSessionConfig.username"
+      :error="passwordDialogError"
+      :is-authenticating="isAuthenticating"
+      @authenticate="handlePasswordAuthentication"
+      @cancel="handlePasswordCancel"
+    />
   </div>
 </template>
 
@@ -103,6 +114,7 @@ import { listen } from '@tauri-apps/api/event'
 import { useSessionsStore } from '../stores/sessions'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import PasswordDialog from './PasswordDialog.vue'
 import '@xterm/xterm/css/xterm.css'
 
 interface Props {
@@ -147,6 +159,12 @@ const currentStepMessage = ref('')
 const showSftp = ref(false)
 const currentPath = ref('/')
 const files = ref<FileItem[]>([])
+
+// Password dialog state
+const showPasswordDialog = ref(false)
+const passwordDialogError = ref('')
+const isAuthenticating = ref(false)
+const pendingSessionConfig = ref<any>(null)
 
 // Event listener cleanup
 let unlistenTerminalOutput: (() => void) | null = null
@@ -236,10 +254,30 @@ async function initializeTerminal() {
   try {
     connectionStatus.value = 'connecting'
     
-    // Connect using new SSH API
+    const session = sessionsStore.sessions.find(s => s.id === props.sessionId)
+    if (!session) {
+      throw new Error('Session not found')
+    }
+    
+    // Check if this is password auth - always prompt for password
+    if (session.auth_method === 'Password') {
+      console.log('Password authentication detected in Terminal - showing password dialog')
+      // Store basic config for password dialog
+      pendingSessionConfig.value = {
+        host: session.host,
+        port: session.port,
+        username: session.username,
+        auth_method: 'Password'
+      }
+      showPasswordDialog.value = true
+      return
+    }
+    
+    // For non-password auth, proceed directly
+    const sessionConfig = await getSessionConfig()
     await invoke('ssh_connect', {
       sessionId: props.sessionId,
-      config: await getSessionConfig()
+      config: sessionConfig
     })
     
     connectionStatus.value = 'connected'
@@ -262,18 +300,26 @@ async function getSessionConfig() {
     throw new Error('Session not found')
   }
   
-  let private_key_path = ''
-  if (typeof session.auth_method === 'object' && 'PublicKey' in session.auth_method) {
-    private_key_path = session.auth_method.PublicKey.key_path
-  } else {
-    throw new Error('Only public key authentication is supported')
-  }
-  
-  return {
+  const baseConfig = {
     host: session.host,
     port: session.port,
-    username: session.username,
-    private_key_path
+    username: session.username
+  }
+  
+  if (session.auth_method === 'Password') {
+    throw new Error('Password authentication requires user input')
+  } else if (typeof session.auth_method === 'object' && 'PublicKey' in session.auth_method) {
+    return {
+      ...baseConfig,
+      auth_method: { PublicKey: { private_key_path: session.auth_method.PublicKey.key_path } }
+    }
+  } else if (session.auth_method === 'Agent') {
+    return {
+      ...baseConfig,
+      auth_method: 'Agent'
+    }
+  } else {
+    throw new Error('Unsupported authentication method')
   }
 }
 
@@ -429,6 +475,52 @@ async function deleteFile(file: FileItem) {
       appendOutput('Delete failed: ' + error + '\n\n')
     }
   }
+}
+
+// Password authentication handlers
+async function handlePasswordAuthentication(password: string) {
+  if (!pendingSessionConfig.value) return
+  
+  isAuthenticating.value = true
+  passwordDialogError.value = ''
+  
+  try {
+    // Create the SSH config with the provided password
+    const config = {
+      host: pendingSessionConfig.value.host,
+      port: pendingSessionConfig.value.port,
+      username: pendingSessionConfig.value.username,
+      auth_method: { Password: { password: password } }
+    }
+    
+    await invoke('ssh_connect_with_password', {
+      sessionId: props.sessionId,
+      config: config,
+      password: password
+    })
+    
+    // Success - close dialog and update status
+    showPasswordDialog.value = false
+    connectionStatus.value = 'connected'
+    isAuthenticating.value = false
+    pendingSessionConfig.value = null
+    
+    if (props.protocol === 'SSH') {
+      await loadRemoteFiles()
+    }
+  } catch (error) {
+    console.error('Password authentication failed:', error)
+    passwordDialogError.value = 'Authentication failed: ' + error
+    isAuthenticating.value = false
+  }
+}
+
+function handlePasswordCancel() {
+  showPasswordDialog.value = false
+  connectionStatus.value = 'disconnected'
+  pendingSessionConfig.value = null
+  passwordDialogError.value = ''
+  isAuthenticating.value = false
 }
 
 function disconnect() {

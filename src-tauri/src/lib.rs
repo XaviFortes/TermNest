@@ -4,8 +4,8 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
-mod ssh;
-use ssh::SshManager;
+mod ssh_new;
+use ssh_new::SshManager;
 
 // Session data structures
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,15 +57,15 @@ pub struct FileItem {
 pub struct AppState {
     pub sessions: Mutex<HashMap<String, Session>>,
     pub active_connections: Mutex<HashMap<String, ConnectionStatus>>,
-    pub ssh_manager: SshManager,
+    pub ssh_manager: std::sync::Arc<SshManager>,
 }
 
 impl AppState {
-    pub fn new(app_handle: AppHandle) -> Self {
+    pub fn new(_app_handle: AppHandle) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
             active_connections: Mutex::new(HashMap::new()),
-            ssh_manager: SshManager::new(app_handle),
+            ssh_manager: std::sync::Arc::new(SshManager::new()),
         }
     }
 }
@@ -206,6 +206,7 @@ async fn delete_session(
 #[tauri::command]
 async fn connect_ssh(
     state: State<'_, AppState>,
+    app: AppHandle,
     #[allow(non_snake_case)] sessionId: String,
 ) -> Result<(), String> {
     let session = {
@@ -219,7 +220,18 @@ async fn connect_ssh(
         connections.insert(sessionId.clone(), ConnectionStatus::Connecting);
     }
 
-    match state.ssh_manager.connect(session).await {
+    // Convert session to SSH config
+    let config = ssh_new::SshConfig {
+        host: session.host,
+        port: session.port,
+        username: session.username,
+        private_key_path: match session.auth_method {
+            AuthMethod::PublicKey { key_path } => key_path,
+            _ => return Err("Only public key authentication is currently supported".to_string()),
+        },
+    };
+
+    match state.ssh_manager.connect(sessionId.clone(), config, app) {
         Ok(_) => {
             let mut connections = state.active_connections.lock().map_err(|e| e.to_string())?;
             connections.insert(sessionId, ConnectionStatus::Connected);
@@ -238,7 +250,7 @@ async fn disconnect_session(
     state: State<'_, AppState>,
     #[allow(non_snake_case)] sessionId: String,
 ) -> Result<(), String> {
-    state.ssh_manager.disconnect(&sessionId).await.map_err(|e| e.to_string())?;
+    state.ssh_manager.disconnect(&sessionId).map_err(|e| e.to_string())?;
     
     let mut connections = state.active_connections.lock().map_err(|e| e.to_string())?;
     connections.insert(sessionId, ConnectionStatus::Disconnected);
@@ -253,7 +265,7 @@ async fn send_terminal_input(
     #[allow(non_snake_case)] sessionId: String,
     input: String,
 ) -> Result<(), String> {
-    state.ssh_manager.send_input(&sessionId, &input).await.map_err(|e| e.to_string())
+    state.ssh_manager.send_input(&sessionId, &input).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -274,11 +286,12 @@ async fn browse_ssh_key(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn list_remote_directory(
-    state: State<'_, AppState>,
-    #[allow(non_snake_case)] sessionId: String,
-    path: String,
+    _state: State<'_, AppState>,
+    #[allow(non_snake_case)] _sessionId: String,
+    _path: String,
 ) -> Result<Vec<FileItem>, String> {
-    state.ssh_manager.list_directory(&sessionId, &path).await.map_err(|e| e.to_string())
+    // SFTP functionality not implemented in new SSH manager yet
+    Err("SFTP functionality not implemented yet".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -288,7 +301,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
+            let ssh_manager = std::sync::Arc::new(ssh_new::SshManager::new());
+            
             app.manage(AppState::new(app_handle));
+            app.manage(ssh_manager);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -302,7 +318,11 @@ pub fn run() {
             disconnect_session,
             send_terminal_input,
             list_remote_directory,
-            browse_ssh_key
+            browse_ssh_key,
+            ssh_new::ssh_connect,
+            ssh_new::ssh_send_input,
+            ssh_new::ssh_disconnect,
+            ssh_new::ssh_list_sessions
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

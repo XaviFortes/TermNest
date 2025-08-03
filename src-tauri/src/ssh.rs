@@ -588,28 +588,62 @@ impl SshManager {
     }
 
     pub async fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
-        println!("DEBUG: Sending input to session {}: {:?}", session_id, input);
-        let connections = self.connections.lock().unwrap();
-        if let Some(connection) = connections.get(session_id) {
-            if let Ok(mut channel_guard) = connection.channel.lock() {
-                if let Some(ref mut channel) = *channel_guard {
-                    println!("DEBUG: Writing {} bytes to channel", input.len());
-                    channel.write_all(input.as_bytes())
-                        .map_err(|e| anyhow!("Failed to send input: {}", e))?;
-                    channel.flush()
-                        .map_err(|e| anyhow!("Failed to flush input: {}", e))?;
-                    println!("DEBUG: Input sent and flushed successfully");
-                } else {
-                    println!("DEBUG: No channel available for session {}", session_id);
-                }
-            } else {
-                println!("DEBUG: Failed to lock channel for session {}", session_id);
+        println!("DEBUG: send_input called for session {}: {:?}", session_id, input);
+        
+        // Step 1: Lock the connection map
+        let connections = self.connections
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock connections: {}", e))?;
+        
+        // Step 2: Fetch the connection
+        let connection = match connections.get(session_id) {
+            Some(conn) => conn.clone(),
+            None => {
+                println!("ERROR: No connection found for session {}", session_id);
+                return Err(anyhow!("No connection found for session {}", session_id));
             }
-        } else {
-            println!("DEBUG: No connection found for session {}", session_id);
-        }
+        };
+    
+        println!("DEBUG: Connection {} found—writing {} bytes", session_id, input.len());
+    
+        // Step 3: Lock the channel
+        let mut channel_guard = match connection.channel.lock() {
+            Ok(guard) => {
+                println!("DEBUG: Channel mutex locked for session {}", session_id);
+                guard
+            }
+            Err(poison) => {
+                println!("WARNING: Channel mutex poisoned for session {}. Recovering.", session_id);
+                poison.into_inner()
+            }
+        };
+    
+        // Step 4: Make sure channel is Some
+        let channel = match channel_guard.as_mut() {
+            Some(ch) => {
+                println!("DEBUG: Got mutable reference to SSH channel for session {}", session_id);
+                ch
+            }
+            None => {
+                println!("ERROR: Channel is None (closed?) for session {}", session_id);
+                return Err(anyhow!("Channel is None (closed?) for session {}", session_id));
+            }
+        };
+    
+        // Step 5: Write to the SSH channel and flush
+        println!("DEBUG: About to write input to channel for session {}: {:?}", session_id, input.as_bytes());
+        channel
+            .write_all(input.as_bytes())
+            .map_err(|e| anyhow!("Failed to write to channel: {}", e))?;
+        channel
+            .flush()
+            .map_err(|e| anyhow!("Failed to flush channel: {}", e))?;
+    
+        println!("DEBUG: Input sent and flushed successfully for session {}", session_id);
         Ok(())
     }
+
+
 
     pub async fn list_directory(&self, session_id: &str, path: &str) -> Result<Vec<FileItem>> {
         let connections = self.connections.lock().unwrap();

@@ -174,8 +174,8 @@ onUnmounted(() => {
 })
 
 async function setupEventListeners() {
-  // Listen for terminal output from the backend
-  unlistenTerminalOutput = await listen('terminal_output', (event: any) => {
+  // Listen for terminal output from the new SSH backend
+  unlistenTerminalOutput = await listen('terminal-data', (event: any) => {
     const payload = event.payload
     if (payload.session_id === props.sessionId) {
       appendOutput(payload.data)
@@ -236,8 +236,11 @@ async function initializeTerminal() {
   try {
     connectionStatus.value = 'connecting'
     
-    // Connect using real SSH
-    await sessionsStore.connectToSession(props.sessionId)
+    // Connect using new SSH API
+    await invoke('ssh_connect', {
+      sessionId: props.sessionId,
+      config: await getSessionConfig()
+    })
     
     connectionStatus.value = 'connected'
     
@@ -250,6 +253,27 @@ async function initializeTerminal() {
     if (terminal) {
       terminal.write('Failed to connect: ' + error + '\r\n')
     }
+  }
+}
+
+async function getSessionConfig() {
+  const session = sessionsStore.sessions.find(s => s.id === props.sessionId)
+  if (!session) {
+    throw new Error('Session not found')
+  }
+  
+  let private_key_path = ''
+  if (typeof session.auth_method === 'object' && 'PublicKey' in session.auth_method) {
+    private_key_path = session.auth_method.PublicKey.key_path
+  } else {
+    throw new Error('Only public key authentication is supported')
+  }
+  
+  return {
+    host: session.host,
+    port: session.port,
+    username: session.username,
+    private_key_path
   }
 }
 
@@ -303,11 +327,11 @@ function setupTerminal() {
   
   // Handle user input
   terminal.onData((data) => {
-    // 1) Locally echo, so user sees input instantly:
-    terminal.write(data)
-    const normalized = data === '\r' ? '\n' : data; 
-    // 2) Forward keystrokes to SSH backend:
-    invoke('send_terminal_input', {
+    // Do NOT echo locally - let SSH server handle echo
+    const normalized = data === '\r' ? '\n' : data
+    
+    // Forward keystrokes to SSH backend using new API
+    invoke('ssh_send_input', {
       sessionId: props.sessionId,
       input: normalized
     }).catch(console.error)
@@ -410,8 +434,8 @@ async function deleteFile(file: FileItem) {
 function disconnect() {
   console.log('Disconnecting session:', props.sessionId)
   
-  // Disconnect from SSH backend
-  invoke('disconnect_session', { sessionId: props.sessionId })
+  // Disconnect from SSH backend using new API
+  invoke('ssh_disconnect', { sessionId: props.sessionId })
     .then(() => {
       console.log('Session disconnected successfully')
     })

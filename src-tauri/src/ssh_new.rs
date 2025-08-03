@@ -36,7 +36,6 @@ struct TerminalEvent {
 // Separate reader and writer handles to avoid mutex contention
 pub struct SshConnection {
     session_id: String,
-    writer_tx: mpsc::UnboundedSender<Vec<u8>>,
     input_tx: mpsc::UnboundedSender<String>,
     reader_shutdown: Arc<AtomicBool>,
     writer_shutdown: Arc<AtomicBool>,
@@ -147,7 +146,6 @@ impl SshConnection {
         // ---- Input buffering and debouncing thread ----
         let input_writer_tx = writer_tx.clone();
         let input_shutdown_clone = input_shutdown.clone();
-        let session_id_input = session_id.clone();
         let input_handle = thread::spawn(move || {
             use std::time::{Instant, Duration};
             let mut buffer = String::new();
@@ -187,7 +185,6 @@ impl SshConnection {
         
         Ok(SshConnection {
             session_id,
-            writer_tx,
             input_tx,
             reader_shutdown,
             writer_shutdown,

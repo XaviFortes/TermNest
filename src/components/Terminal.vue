@@ -269,7 +269,12 @@ async function initializeTerminal() {
   try {
     connectionStatus.value = 'connecting'
     
-    const session = sessionsStore.sessions.find(s => s.id === props.sessionId)
+    // For additional connections, extract the original session ID
+    const originalSessionId = props.sessionId.includes('_conn_') 
+      ? props.sessionId.split('_conn_')[0] 
+      : props.sessionId
+    
+    const session = sessionsStore.sessions.find(s => s.id === originalSessionId)
     if (!session) {
       throw new Error('Session not found')
     }
@@ -320,7 +325,12 @@ async function initializeTerminal() {
 }
 
 async function getSessionConfig() {
-  const session = sessionsStore.sessions.find(s => s.id === props.sessionId)
+  // For additional connections, extract the original session ID
+  const originalSessionId = props.sessionId.includes('_conn_') 
+    ? props.sessionId.split('_conn_')[0] 
+    : props.sessionId
+    
+  const session = sessionsStore.sessions.find(s => s.id === originalSessionId)
   if (!session) {
     throw new Error('Session not found')
   }

@@ -53,6 +53,22 @@ const connectionStatuses = computed(() => {
   return statuses
 })
 
+// Count active connections per session (including multiple connections)
+const connectionCounts = computed(() => {
+  const counts: Record<string, number> = {}
+  
+  sessionsStore.sessions.forEach(session => {
+    // Count how many active sessions are based on this session (original + additional connections)
+    const baseId = session.id
+    const relatedSessions = sessionsStore.activeSessions.filter(activeSession => 
+      activeSession.id === baseId || activeSession.id.startsWith(`${baseId}_conn_`)
+    )
+    counts[session.id] = relatedSessions.length
+  })
+  
+  return counts
+})
+
 function openCreateModal() {
   console.log('SessionManager: Opening create modal')
   showCreateModal.value = true
@@ -81,7 +97,24 @@ function toggleSidebar() {
 }
 
 function openSession(session: Session) {
-  sessionsStore.openSession(session)
+  // Check if the session is already active
+  const existingSession = sessionsStore.activeSessions.find(s => s.id === session.id)
+  
+  if (existingSession) {
+    // If already active, create a new connection instance
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const newConnectionSession = {
+      ...session,
+      id: `${session.id}_conn_${Date.now()}`,
+      name: `${session.name} (${timestamp})`,
+    }
+    console.log('Creating additional connection for session:', session.name)
+    sessionsStore.openSession(newConnectionSession)
+  } else {
+    // If not active, open normally
+    console.log('Opening new session:', session.name)
+    sessionsStore.openSession(session)
+  }
 }
 
 function showSessionContextMenu(event: MouseEvent, session: Session) {
@@ -122,6 +155,22 @@ function duplicateSession() {
     delete (duplicatedSession as any).id
     delete (duplicatedSession as any).created_at
     sessionsStore.createSession(duplicatedSession)
+    hideContextMenu()
+  }
+}
+
+function createNewConnection() {
+  if (contextMenuSession.value) {
+    const session = contextMenuSession.value
+    // Create a temporary session instance with a unique ID for this connection
+    const newConnectionSession = {
+      ...session,
+      id: `${session.id}_conn_${Date.now()}`, // Unique ID for this connection instance
+      name: `${session.name} (${new Date().toLocaleTimeString()})`, // Add timestamp to differentiate
+    }
+    
+    // Open this new connection instance directly
+    sessionsStore.openSession(newConnectionSession)
     hideContextMenu()
   }
 }
@@ -315,7 +364,12 @@ onUnmounted(() => {
               }"></div>
             </div>
             <div class="session-info">
-              <div class="session-name">{{ session.name }}</div>
+              <div class="session-name">
+                {{ session.name }}
+                <span v-if="connectionCounts[session.id] > 0" class="connection-badge">
+                  {{ connectionCounts[session.id] }}
+                </span>
+              </div>
               <div class="session-details">
                 {{ session.username }}@{{ session.host }}
                 <span class="status-debug" v-if="connectionStatuses[session.id] !== 'disconnected'">
@@ -440,6 +494,7 @@ onUnmounted(() => {
       :show="showContextMenu"
       :position="contextMenuPosition"
       @connect="connectToSession"
+      @new-connection="createNewConnection"
       @edit="editSession"
       @duplicate="duplicateSession"
       @export="exportSession"
@@ -668,6 +723,24 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  background: var(--text-accent);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 0 0.25rem;
+  line-height: 1;
 }
 
 .session-details {

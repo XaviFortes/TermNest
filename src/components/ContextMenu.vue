@@ -9,6 +9,10 @@
       <span class="menu-icon">🔗</span>
       Connect
     </div>
+    <div class="context-menu-item" @click="$emit('new-connection')">
+      <span class="menu-icon">🚀</span>
+      New Connection
+    </div>
     <div class="context-menu-item" @click="$emit('edit')">
       <span class="menu-icon">✏️</span>
       Edit
@@ -51,6 +55,7 @@ defineProps<{
 
 defineEmits<{
   connect: []
+  'new-connection': []
   edit: []
   duplicate: []
   export: []

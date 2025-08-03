@@ -32,13 +32,41 @@ const filteredSessions = computed(() => {
 })
 
 const recentSessions = computed(() => {
-  return [...sessionsStore.sessions]
-    .sort((a, b) => {
-      const aTime = a.last_used ? new Date(a.last_used).getTime() : 0
-      const bTime = b.last_used ? new Date(b.last_used).getTime() : 0
-      return bTime - aTime
-    })
+  return sessionsStore.sessions
+    .filter(session => session.last_used)
+    .sort((a, b) => new Date(b.last_used!).getTime() - new Date(a.last_used!).getTime())
     .slice(0, 5)
+})
+
+// Force reactivity for connection statuses
+const connectionStatuses = computed(() => {
+  // Explicitly watch the activeConnections object
+  const connections = sessionsStore.activeConnections
+  const statuses: Record<string, string> = {}
+  
+  sessionsStore.sessions.forEach(session => {
+    const status = connections[session.id]
+    statuses[session.id] = status?.status || 'disconnected'
+  })
+  
+  console.log('SessionManager: computed connectionStatuses:', statuses)
+  return statuses
+})
+
+// Count active connections per session (including multiple connections)
+const connectionCounts = computed(() => {
+  const counts: Record<string, number> = {}
+  
+  sessionsStore.sessions.forEach(session => {
+    // Count how many active sessions are based on this session (original + additional connections)
+    const baseId = session.id
+    const relatedSessions = sessionsStore.activeSessions.filter(activeSession => 
+      activeSession.id === baseId || activeSession.id.startsWith(`${baseId}_conn_`)
+    )
+    counts[session.id] = relatedSessions.length
+  })
+  
+  return counts
 })
 
 function openCreateModal() {
@@ -69,7 +97,24 @@ function toggleSidebar() {
 }
 
 function openSession(session: Session) {
-  sessionsStore.openSession(session)
+  // Check if the session is already active
+  const existingSession = sessionsStore.activeSessions.find(s => s.id === session.id)
+  
+  if (existingSession) {
+    // If already active, create a new connection instance
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const newConnectionSession = {
+      ...session,
+      id: `${session.id}_conn_${Date.now()}`,
+      name: `${session.name} (${timestamp})`,
+    }
+    console.log('Creating additional connection for session:', session.name)
+    sessionsStore.openSession(newConnectionSession)
+  } else {
+    // If not active, open normally
+    console.log('Opening new session:', session.name)
+    sessionsStore.openSession(session)
+  }
 }
 
 function showSessionContextMenu(event: MouseEvent, session: Session) {
@@ -114,6 +159,22 @@ function duplicateSession() {
   }
 }
 
+function createNewConnection() {
+  if (contextMenuSession.value) {
+    const session = contextMenuSession.value
+    // Create a temporary session instance with a unique ID for this connection
+    const newConnectionSession = {
+      ...session,
+      id: `${session.id}_conn_${Date.now()}`, // Unique ID for this connection instance
+      name: `${session.name} (${new Date().toLocaleTimeString()})`, // Add timestamp to differentiate
+    }
+    
+    // Open this new connection instance directly
+    sessionsStore.openSession(newConnectionSession)
+    hideContextMenu()
+  }
+}
+
 function exportSession() {
   if (contextMenuSession.value) {
     const session = contextMenuSession.value
@@ -146,6 +207,15 @@ function deleteSession() {
       hideContextMenu()
     }
   }
+}
+
+// Debug function to test connection statuses
+function testConnectionStatus(session: Session, status: 'connected' | 'connecting' | 'error' | 'disconnected') {
+  sessionsStore.updateConnectionStatus({
+    session_id: session.id,
+    status: status,
+    message: `Test ${status} status`
+  })
 }
 
 function closeCurrentTab() {
@@ -281,21 +351,31 @@ onUnmounted(() => {
             class="session-item"
             :class="{
               'active': sessionsStore.activeSessions.find(s => s.id === session.id),
-              'connected': sessionsStore.getConnectionStatus(session.id)?.status === 'connected'
+              'connected': connectionStatuses[session.id] === 'connected'
             }"
             @click="openSession(session)"
             @contextmenu="showSessionContextMenu($event, session)"
           >
             <div class="session-status">
               <div class="status-dot" :class="{
-                'connected': sessionsStore.getConnectionStatus(session.id)?.status === 'connected',
-                'connecting': sessionsStore.getConnectionStatus(session.id)?.status === 'connecting',
-                'error': sessionsStore.getConnectionStatus(session.id)?.status === 'error'
+                'connected': connectionStatuses[session.id] === 'connected',
+                'connecting': connectionStatuses[session.id] === 'connecting',
+                'error': connectionStatuses[session.id] === 'error'
               }"></div>
             </div>
             <div class="session-info">
-              <div class="session-name">{{ session.name }}</div>
-              <div class="session-details">{{ session.username }}@{{ session.host }}</div>
+              <div class="session-name">
+                {{ session.name }}
+                <span v-if="connectionCounts[session.id] > 0" class="connection-badge">
+                  {{ connectionCounts[session.id] }}
+                </span>
+              </div>
+              <div class="session-details">
+                {{ session.username }}@{{ session.host }}
+                <span class="status-debug" v-if="connectionStatuses[session.id] !== 'disconnected'">
+                  • {{ connectionStatuses[session.id] }}
+                </span>
+              </div>
             </div>
             <div class="session-protocol">{{ session.protocol }}</div>
           </div>
@@ -316,13 +396,24 @@ onUnmounted(() => {
           <p>No sessions match "{{ searchQuery }}".</p>
         </div>
 
-        <div v-if="sessionsStore.error" class="error-message">
-          <span class="error-icon">⚠️</span>
-          {{ sessionsStore.error }}
-        </div>
-      </div>
+          <div v-if="sessionsStore.error" class="error-message">
+            <span class="error-icon">⚠️</span>
+            {{ sessionsStore.error }}
+          </div>
 
-      <!-- Collapsed sidebar content -->
+          <!-- Debug panel -->
+          <div class="debug-panel" v-if="Object.keys(connectionStatuses).length > 0 && false"> <!-- Debugging disabled -->
+            <h4>Connection Status Debug</h4>
+            <div v-for="(status, sessionId) in connectionStatuses" :key="sessionId" class="debug-item">
+              <span class="debug-session">{{ sessionsStore.sessions.find(s => s.id === sessionId)?.name || sessionId }}</span>
+              <span class="debug-status" :class="status">{{ status }}</span>
+              <div class="debug-actions">
+                <button @click="sessionsStore.setSessionConnected(sessionId)" class="debug-btn connected">✓</button>
+                <button @click="sessionsStore.setSessionDisconnected(sessionId)" class="debug-btn disconnected">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>      <!-- Collapsed sidebar content -->
       <div class="sidebar-collapsed-content" v-else>
         <div class="collapsed-sessions">
           <div
@@ -331,15 +422,15 @@ onUnmounted(() => {
             class="collapsed-session-item"
             :class="{
               'active': sessionsStore.activeSessions.find(s => s.id === session.id),
-              'connected': sessionsStore.getConnectionStatus(session.id)?.status === 'connected'
+              'connected': connectionStatuses[session.id] === 'connected'
             }"
             @click="openSession(session)"
             :title="session.name"
           >
             <div class="status-dot" :class="{
-              'connected': sessionsStore.getConnectionStatus(session.id)?.status === 'connected',
-              'connecting': sessionsStore.getConnectionStatus(session.id)?.status === 'connecting',
-              'error': sessionsStore.getConnectionStatus(session.id)?.status === 'error'
+              'connected': connectionStatuses[session.id] === 'connected',
+              'connecting': connectionStatuses[session.id] === 'connecting',
+              'error': connectionStatuses[session.id] === 'error'
             }"></div>
           </div>
         </div>
@@ -403,10 +494,14 @@ onUnmounted(() => {
       :show="showContextMenu"
       :position="contextMenuPosition"
       @connect="connectToSession"
+      @new-connection="createNewConnection"
       @edit="editSession"
       @duplicate="duplicateSession"
       @export="exportSession"
       @delete="deleteSession"
+      @test-connected="() => testConnectionStatus(contextMenuSession!, 'connected')"
+      @test-connecting="() => testConnectionStatus(contextMenuSession!, 'connecting')"
+      @test-error="() => testConnectionStatus(contextMenuSession!, 'error')"
     />
   </div>
 </template>
@@ -589,7 +684,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.status-dot {
+.session-status .status-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -597,18 +692,18 @@ onUnmounted(() => {
   transition: all 0.2s ease;
 }
 
-.status-dot.connected {
-  background: #28a745;
+.session-status .status-dot.connected {
+  background: #28a745 !important;
   box-shadow: 0 0 6px rgba(40, 167, 69, 0.5);
 }
 
-.status-dot.connecting {
-  background: #ffc107;
+.session-status .status-dot.connecting {
+  background: #ffc107 !important;
   animation: pulse 1.5s infinite;
 }
 
-.status-dot.error {
-  background: #dc3545;
+.session-status .status-dot.error {
+  background: #dc3545 !important;
 }
 
 @keyframes pulse {
@@ -628,6 +723,24 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  background: var(--text-accent);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 0 0.25rem;
+  line-height: 1;
 }
 
 .session-details {
@@ -636,6 +749,12 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.status-debug {
+  color: var(--text-accent);
+  font-weight: 500;
+  text-transform: capitalize;
 }
 
 .session-protocol {
@@ -696,6 +815,21 @@ onUnmounted(() => {
   width: 10px;
   height: 10px;
   border: 2px solid var(--bg-secondary);
+  background: var(--text-secondary);
+}
+
+.collapsed-session-item .status-dot.connected {
+  background: #28a745 !important;
+  box-shadow: 0 0 4px rgba(40, 167, 69, 0.5);
+}
+
+.collapsed-session-item .status-dot.connecting {
+  background: #ffc107 !important;
+  animation: pulse 1.5s infinite;
+}
+
+.collapsed-session-item .status-dot.error {
+  background: #dc3545 !important;
 }
 
 .collapsed-add-btn {
@@ -765,6 +899,99 @@ onUnmounted(() => {
 
 .error-icon {
   font-size: 1rem;
+}
+
+/* Debug panel */
+.debug-panel {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: var(--bg-primary);
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.debug-panel h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.debug-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.25rem 0;
+  font-size: 0.75rem;
+  gap: 0.5rem;
+}
+
+.debug-session {
+  color: var(--text-primary);
+  font-weight: 500;
+  flex: 1;
+}
+
+.debug-status {
+  padding: 0.125rem 0.5rem;
+  border-radius: 3px;
+  font-weight: 500;
+  text-transform: uppercase;
+  min-width: 80px;
+  text-align: center;
+}
+
+.debug-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.debug-btn {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: bold;
+  transition: all 0.2s ease;
+}
+
+.debug-btn.connected {
+  background: #28a745;
+  color: white;
+}
+
+.debug-btn.connected:hover {
+  background: #218838;
+}
+
+.debug-btn.disconnected {
+  background: #dc3545;
+  color: white;
+}
+
+.debug-btn.disconnected:hover {
+  background: #c82333;
+}
+
+.debug-status.connected {
+  background: rgba(40, 167, 69, 0.1);
+  color: #28a745;
+}
+
+.debug-status.connecting {
+  background: rgba(255, 193, 7, 0.1);
+  color: #ffc107;
+}
+
+.debug-status.error {
+  background: rgba(220, 53, 69, 0.1);
+  color: #dc3545;
+}
+
+.debug-status.disconnected {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
 }
 
 /* Main content area */

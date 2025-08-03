@@ -250,8 +250,18 @@ function updateConnectionProgress(status: string, message?: string) {
   } else if (status === 'connected') {
     currentStepIndex.value = connectionSteps.value.length - 1
     connectionStatus.value = 'connected'
+    sessionsStore.updateConnectionStatus({
+      session_id: props.sessionId,
+      status: 'connected',
+      message: 'Connection established'
+    })
   } else if (status === 'disconnected') {
     connectionStatus.value = 'disconnected'
+    sessionsStore.updateConnectionStatus({
+      session_id: props.sessionId,
+      status: 'disconnected',
+      message: 'Connection closed'
+    })
   }
 }
 
@@ -259,7 +269,12 @@ async function initializeTerminal() {
   try {
     connectionStatus.value = 'connecting'
     
-    const session = sessionsStore.sessions.find(s => s.id === props.sessionId)
+    // For additional connections, extract the original session ID
+    const originalSessionId = props.sessionId.includes('_conn_') 
+      ? props.sessionId.split('_conn_')[0] 
+      : props.sessionId
+    
+    const session = sessionsStore.sessions.find(s => s.id === originalSessionId)
     if (!session) {
       throw new Error('Session not found')
     }
@@ -286,6 +301,11 @@ async function initializeTerminal() {
     })
     
     connectionStatus.value = 'connected'
+    sessionsStore.updateConnectionStatus({
+      session_id: props.sessionId,
+      status: 'connected',
+      message: 'SSH connection established'
+    })
     
     if (props.protocol === 'SSH') {
       await loadRemoteFiles()
@@ -293,6 +313,11 @@ async function initializeTerminal() {
   } catch (error) {
     console.error('Failed to initialize terminal:', error)
     connectionStatus.value = 'disconnected'
+    sessionsStore.updateConnectionStatus({
+      session_id: props.sessionId,
+      status: 'disconnected',
+      message: 'Failed to connect: ' + error
+    })
     if (terminal) {
       terminal.write('Failed to connect: ' + error + '\r\n')
     }
@@ -300,7 +325,12 @@ async function initializeTerminal() {
 }
 
 async function getSessionConfig() {
-  const session = sessionsStore.sessions.find(s => s.id === props.sessionId)
+  // For additional connections, extract the original session ID
+  const originalSessionId = props.sessionId.includes('_conn_') 
+    ? props.sessionId.split('_conn_')[0] 
+    : props.sessionId
+    
+  const session = sessionsStore.sessions.find(s => s.id === originalSessionId)
   if (!session) {
     throw new Error('Session not found')
   }
@@ -557,6 +587,11 @@ async function handlePasswordAuthentication(password: string) {
     // Success - close dialog and update status
     showPasswordDialog.value = false
     connectionStatus.value = 'connected'
+    sessionsStore.updateConnectionStatus({
+      session_id: props.sessionId,
+      status: 'connected',
+      message: 'SSH connection established via password'
+    })
     isAuthenticating.value = false
     pendingSessionConfig.value = null
     
@@ -573,6 +608,11 @@ async function handlePasswordAuthentication(password: string) {
 function handlePasswordCancel() {
   showPasswordDialog.value = false
   connectionStatus.value = 'disconnected'
+  sessionsStore.updateConnectionStatus({
+    session_id: props.sessionId,
+    status: 'disconnected',
+    message: 'Password authentication cancelled'
+  })
   pendingSessionConfig.value = null
   passwordDialogError.value = ''
   isAuthenticating.value = false
@@ -592,6 +632,11 @@ function disconnect() {
   
   // Update local state
   connectionStatus.value = 'disconnected'
+  sessionsStore.updateConnectionStatus({
+    session_id: props.sessionId,
+    status: 'disconnected',
+    message: 'Session disconnected'
+  })
   
   // Close the session and go back to sessions list
   sessionsStore.closeSession()

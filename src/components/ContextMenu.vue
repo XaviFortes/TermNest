@@ -9,6 +9,10 @@
       <span class="menu-icon">🔗</span>
       Connect
     </div>
+    <div class="context-menu-item" @click="$emit('new-connection')">
+      <span class="menu-icon">🚀</span>
+      New Connection
+    </div>
     <div class="context-menu-item" @click="$emit('edit')">
       <span class="menu-icon">✏️</span>
       Edit
@@ -21,6 +25,19 @@
     <div class="context-menu-item" @click="$emit('export')">
       <span class="menu-icon">📤</span>
       Export
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" @click="$emit('test-connected')">
+      <span class="menu-icon">🟢</span>
+      Test Connected
+    </div>
+    <div class="context-menu-item" @click="$emit('test-connecting')">
+      <span class="menu-icon">🟡</span>
+      Test Connecting
+    </div>
+    <div class="context-menu-item" @click="$emit('test-error')">
+      <span class="menu-icon">🔴</span>
+      Test Error
     </div>
     <div class="context-menu-separator"></div>
     <div class="context-menu-item danger" @click="$emit('delete')">
@@ -38,10 +55,14 @@ defineProps<{
 
 defineEmits<{
   connect: []
+  'new-connection': []
   edit: []
   duplicate: []
   export: []
   delete: []
+  'test-connected': []
+  'test-connecting': []
+  'test-error': []
 }>()
 </script>
 

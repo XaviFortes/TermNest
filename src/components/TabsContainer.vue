@@ -9,9 +9,9 @@
           class="tab"
           :class="{ 
             'active': session.id === currentActiveSessionId,
-            'connected': getConnectionStatus(session.id)?.status === 'connected',
-            'connecting': getConnectionStatus(session.id)?.status === 'connecting',
-            'error': getConnectionStatus(session.id)?.status === 'error'
+            'connected': tabConnectionStatuses[session.id] === 'connected',
+            'connecting': tabConnectionStatuses[session.id] === 'connecting',
+            'error': tabConnectionStatuses[session.id] === 'error'
           }"
           @click="switchToSession(session.id)"
         >
@@ -119,6 +119,20 @@ const availableSessions = computed(() => {
   )
 })
 
+// Force reactivity for connection statuses in tabs
+const tabConnectionStatuses = computed(() => {
+  const connections = sessionsStore.activeConnections
+  const statuses: Record<string, string> = {}
+  
+  activeSessions.value.forEach(session => {
+    const status = connections[session.id]
+    statuses[session.id] = status?.status || 'disconnected'
+  })
+  
+  console.log('TabsContainer: computed tabConnectionStatuses:', statuses)
+  return statuses
+})
+
 function switchToSession(sessionId: string) {
   sessionsStore.switchToSession(sessionId)
 }
@@ -131,10 +145,6 @@ function closeSessionTab(sessionId: string) {
   }
   // Close the tab
   sessionsStore.closeSession(sessionId)
-}
-
-function getConnectionStatus(sessionId: string) {
-  return sessionsStore.getConnectionStatus(sessionId)
 }
 
 function showSessionSelector() {

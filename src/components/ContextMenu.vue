@@ -23,6 +23,19 @@
       Export
     </div>
     <div class="context-menu-separator"></div>
+    <div class="context-menu-item" @click="$emit('test-connected')">
+      <span class="menu-icon">🟢</span>
+      Test Connected
+    </div>
+    <div class="context-menu-item" @click="$emit('test-connecting')">
+      <span class="menu-icon">🟡</span>
+      Test Connecting
+    </div>
+    <div class="context-menu-item" @click="$emit('test-error')">
+      <span class="menu-icon">🔴</span>
+      Test Error
+    </div>
+    <div class="context-menu-separator"></div>
     <div class="context-menu-item danger" @click="$emit('delete')">
       <span class="menu-icon">🗑️</span>
       Delete
@@ -42,6 +55,9 @@ defineEmits<{
   duplicate: []
   export: []
   delete: []
+  'test-connected': []
+  'test-connecting': []
+  'test-error': []
 }>()
 </script>
 

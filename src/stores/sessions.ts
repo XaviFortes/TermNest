@@ -33,14 +33,14 @@ export const useSessionsStore = defineStore('sessions', () => {
   const sessions = ref<Session[]>([])
   const activeSessions = ref<Session[]>([]) // Multiple active sessions
   const currentActiveSessionId = ref<string | null>(null) // Currently focused session
-  const activeConnections = ref<Map<string, ConnectionStatus>>(new Map())
+  const activeConnections = ref<Record<string, ConnectionStatus>>({}) // Changed from Map to object
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
   // Computed
   const connectedSessions = computed(() => {
     return sessions.value.filter(session => {
-      const status = activeConnections.value.get(session.id)
+      const status = activeConnections.value[session.id]
       return status?.status === 'connected'
     })
   })
@@ -160,7 +160,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     try {
       await invoke('delete_session', { sessionId })
       sessions.value = sessions.value.filter(s => s.id !== sessionId)
-      activeConnections.value.delete(sessionId)
+      delete activeConnections.value[sessionId]
     } catch (err) {
       error.value = err as string
       throw err
@@ -195,7 +195,7 @@ export const useSessionsStore = defineStore('sessions', () => {
   async function disconnectSession(sessionId: string) {
     try {
       console.log('Store: Disconnecting session:', sessionId)
-      console.log('Store: Current connection status before:', activeConnections.value.get(sessionId))
+      console.log('Store: Current connection status before:', activeConnections.value[sessionId])
       
       await invoke('disconnect_session', { sessionId })
       console.log('Store: Backend disconnect call completed')
@@ -210,7 +210,7 @@ export const useSessionsStore = defineStore('sessions', () => {
       console.log('Store: Updating connection status to:', newStatus)
       updateConnectionStatus(newStatus)
       
-      console.log('Store: Connection status after update:', activeConnections.value.get(sessionId))
+      console.log('Store: Connection status after update:', activeConnections.value[sessionId])
       console.log('Store: Session disconnected successfully:', sessionId)
     } catch (err) {
       console.error('Store: Failed to disconnect session:', err)
@@ -220,11 +220,33 @@ export const useSessionsStore = defineStore('sessions', () => {
   }
 
   function updateConnectionStatus(status: ConnectionStatus) {
-    activeConnections.value.set(status.session_id, status)
+    console.log('Store: Updating connection status:', status)
+    activeConnections.value[status.session_id] = status
+    // Force reactivity by creating a new object
+    activeConnections.value = { ...activeConnections.value }
+    console.log('Store: Updated activeConnections:', activeConnections.value)
   }
 
   function getConnectionStatus(sessionId: string): ConnectionStatus | undefined {
-    return activeConnections.value.get(sessionId)
+    return activeConnections.value[sessionId]
+  }
+
+  function setSessionConnected(sessionId: string) {
+    console.log('Store: Manually setting session as connected:', sessionId)
+    updateConnectionStatus({
+      session_id: sessionId,
+      status: 'connected',
+      message: 'Connection established'
+    })
+  }
+
+  function setSessionDisconnected(sessionId: string) {
+    console.log('Store: Manually setting session as disconnected:', sessionId)
+    updateConnectionStatus({
+      session_id: sessionId,
+      status: 'disconnected',
+      message: 'Connection closed'
+    })
   }
 
   function openSession(session: Session) {
@@ -235,6 +257,13 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
     // Set as current active session
     currentActiveSessionId.value = session.id
+    
+    // Set initial connecting status when opening a session
+    updateConnectionStatus({
+      session_id: session.id,
+      status: 'connecting',
+      message: 'Initializing connection...'
+    })
   }
 
   function closeSession(sessionId?: string) {
@@ -262,8 +291,13 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   // Initialize event listeners
   function initializeEventListeners() {
+    console.log('Store: Setting up connection_status event listener')
     listen<ConnectionStatus>('connection_status', (event) => {
+      console.log('Store: Received connection_status event:', event)
+      console.log('Store: Event payload:', event.payload)
       updateConnectionStatus(event.payload)
+    }).catch(err => {
+      console.error('Store: Failed to set up connection_status listener:', err)
     })
   }
 
@@ -288,6 +322,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     disconnectSession,
     updateConnectionStatus,
     getConnectionStatus,
+    setSessionConnected,
+    setSessionDisconnected,
     openSession,
     closeSession,
     switchToSession,

@@ -388,12 +388,12 @@ function setupTerminal() {
   // Handle user input
   terminal.onData((data) => {
     // Do NOT echo locally - let SSH server handle echo
-    const normalized = data === '\r' ? '\n' : data
+    // Send raw keypress data without conversion to preserve terminal semantics
     
     // Forward keystrokes to SSH backend using new API
     invoke('ssh_send_input', {
       sessionId: props.sessionId,
-      input: normalized
+      input: data
     }).catch(console.error)
   })
 

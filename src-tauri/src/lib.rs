@@ -121,15 +121,19 @@ fn get_default_ssh_key_path() -> String {
     #[cfg(target_os = "windows")]
     {
         if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            format!("{}\\.ssh\\id_rsa", userprofile)
+            format!("{}\\.ssh\\id_ed25519", userprofile)
         } else {
-            "%USERPROFILE%\\.ssh\\id_rsa".to_string()
+            "%USERPROFILE%\\.ssh\\id_ed25519".to_string()
         }
     }
     
     #[cfg(not(target_os = "windows"))]
     {
-        "~/.ssh/id_rsa".to_string()
+        if let Ok(home) = std::env::var("HOME") {
+            format!("{}/.ssh/id_ed25519", home)
+        } else {
+            "~/.ssh/id_ed25519".to_string()
+        }
     }
 }
 
@@ -272,11 +276,39 @@ async fn send_terminal_input(
 async fn browse_ssh_key(app: AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     
-    let file_path = app.dialog().file()
-        .set_title("Select SSH Private Key")
-        .add_filter("SSH Keys", &["*"])
-        .add_filter("All Files", &["*"])
-        .blocking_pick_file();
+    // Get the default SSH directory to start the dialog in
+    let default_ssh_dir = {
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(userprofile) = std::env::var("USERPROFILE") {
+                format!("{}\\.ssh", userprofile)
+            } else {
+                "".to_string()
+            }
+        }
+        
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Ok(home) = std::env::var("HOME") {
+                format!("{}/.ssh", home)
+            } else {
+                "".to_string()
+            }
+        }
+    };
+    
+    let mut dialog = app.dialog().file()
+        .set_title("Select SSH Private Key");
+        // .add_filter("SSH Private Keys", &["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"])
+        // .add_filter("All Files", &["*"]);
+    
+    // Set initial directory to .ssh folder if it exists
+    if !default_ssh_dir.is_empty() && std::path::Path::new(&default_ssh_dir).exists() {
+        dialog = dialog.set_directory(&default_ssh_dir);
+    }
+    
+    // On macOS, the dialog should show hidden files by default when starting in .ssh
+    let file_path = dialog.blocking_pick_file();
     
     match file_path {
         Some(path) => Ok(Some(path.to_string())),

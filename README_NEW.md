@@ -216,13 +216,6 @@ termnest/
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
-
-- **Tauri Team**: For the excellent cross-platform framework
-- **MobaXterm**: Inspiration for features and UI design
-- **WezTerm**: Reference for SSH integration patterns
-- **Vue.js Team**: For the reactive frontend framework
-
 ## 📞 Support
 
 - 🐛 **Issues**: [GitHub Issues](https://github.com/yourusername/termnest/issues)

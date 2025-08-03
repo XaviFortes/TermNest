@@ -189,6 +189,11 @@ onUnmounted(() => {
   if (unlistenConnectionStatus) {
     unlistenConnectionStatus()
   }
+  
+  // Cleanup terminal resize handlers
+  if (terminalContainer.value && (terminalContainer.value as any).__terminalCleanup) {
+    ;(terminalContainer.value as any).__terminalCleanup()
+  }
 })
 
 async function setupEventListeners() {
@@ -360,7 +365,10 @@ function setupTerminal() {
     fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
     cursorBlink: true,
     convertEol: true,
-    scrollback: 1000
+    scrollback: 10000, /* Increase scrollback for better history */
+    fastScrollModifier: 'alt', /* Enable fast scrolling */
+    allowTransparency: false,
+    smoothScrollDuration: 100
   })
   
   // Create fit addon
@@ -369,7 +377,13 @@ function setupTerminal() {
   
   // Open terminal in container
   terminal.open(terminalContainer.value)
-  fitAddon.fit()
+  
+  // Fit terminal to container size
+  setTimeout(() => {
+    if (fitAddon) {
+      fitAddon.fit()
+    }
+  }, 0)
   
   // Handle user input
   terminal.onData((data) => {
@@ -384,13 +398,54 @@ function setupTerminal() {
   })
 
   
-  // Handle resize
+  // Handle resize with debouncing
+  let resizeTimeout: number | null = null
   const resizeObserver = new ResizeObserver(() => {
-    if (fitAddon) {
-      fitAddon.fit()
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout)
     }
+    resizeTimeout = window.setTimeout(() => {
+      if (fitAddon && terminal) {
+        try {
+          fitAddon.fit()
+        } catch (error) {
+          console.warn('Terminal resize failed:', error)
+        }
+      }
+    }, 50)
   })
+  
   resizeObserver.observe(terminalContainer.value)
+  
+  // Also handle window resize
+  const handleWindowResize = () => {
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout)
+    }
+    resizeTimeout = window.setTimeout(() => {
+      if (fitAddon && terminal) {
+        try {
+          fitAddon.fit()
+        } catch (error) {
+          console.warn('Terminal window resize failed:', error)
+        }
+      }
+    }, 100)
+  }
+  
+  window.addEventListener('resize', handleWindowResize)
+  
+  // Cleanup function
+  const cleanup = () => {
+    if (resizeTimeout) {
+      clearTimeout(resizeTimeout)
+    }
+    window.removeEventListener('resize', handleWindowResize)
+    resizeObserver.disconnect()
+  }
+  
+  // Store cleanup function for later use
+  ;(terminalContainer.value as any).__terminalCleanup = cleanup
 }
 
 function focusTerminal() {
@@ -560,6 +615,7 @@ function disconnect() {
   padding: 0.75rem 1rem;
   background: #2d2d2d;
   border-bottom: 1px solid #404040;
+  flex-shrink: 0; /* Prevent header from shrinking */
 }
 
 .terminal-title {
@@ -599,6 +655,7 @@ function disconnect() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0; /* Important for flex child */
 }
 
 /* Connection Log Styles */
@@ -722,9 +779,9 @@ function disconnect() {
 
 .terminal-content {
   flex: 1;
-  padding: 1rem;
-  overflow-y: auto;
+  overflow: hidden; /* Let xterm.js handle scrolling */
   cursor: text;
+  min-height: 0; /* Important for flex child */
 }
 
 .terminal-simulation {

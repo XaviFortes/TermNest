@@ -31,7 +31,8 @@ export interface ConnectionStatus {
 export const useSessionsStore = defineStore('sessions', () => {
   // State
   const sessions = ref<Session[]>([])
-  const activeSession = ref<Session | null>(null)
+  const activeSessions = ref<Session[]>([]) // Multiple active sessions
+  const currentActiveSessionId = ref<string | null>(null) // Currently focused session
   const activeConnections = ref<Map<string, ConnectionStatus>>(new Map())
   const isLoading = ref(false)
   const error = ref<string | null>(null)
@@ -42,6 +43,10 @@ export const useSessionsStore = defineStore('sessions', () => {
       const status = activeConnections.value.get(session.id)
       return status?.status === 'connected'
     })
+  })
+
+  const currentActiveSession = computed(() => {
+    return activeSessions.value.find(session => session.id === currentActiveSessionId.value) || null
   })
 
   // Actions
@@ -224,12 +229,35 @@ export const useSessionsStore = defineStore('sessions', () => {
 
   function openSession(session: Session) {
     console.log('Opening session:', session)
-    activeSession.value = session
+    // Add to active sessions if not already there
+    if (!activeSessions.value.find(s => s.id === session.id)) {
+      activeSessions.value.push(session)
+    }
+    // Set as current active session
+    currentActiveSessionId.value = session.id
   }
 
-  function closeSession() {
-    console.log('Closing active session')
-    activeSession.value = null
+  function closeSession(sessionId?: string) {
+    if (sessionId) {
+      console.log('Closing specific session:', sessionId)
+      // Remove from active sessions
+      activeSessions.value = activeSessions.value.filter(s => s.id !== sessionId)
+      // If this was the current active session, switch to another or clear
+      if (currentActiveSessionId.value === sessionId) {
+        currentActiveSessionId.value = activeSessions.value.length > 0 ? activeSessions.value[0].id : null
+      }
+    } else {
+      console.log('Closing all active sessions')
+      activeSessions.value = []
+      currentActiveSessionId.value = null
+    }
+  }
+
+  function switchToSession(sessionId: string) {
+    const session = activeSessions.value.find(s => s.id === sessionId)
+    if (session) {
+      currentActiveSessionId.value = sessionId
+    }
   }
 
   // Initialize event listeners
@@ -242,12 +270,14 @@ export const useSessionsStore = defineStore('sessions', () => {
   return {
     // State
     sessions,
-    activeSession,
+    activeSessions,
+    currentActiveSessionId,
     activeConnections,
     isLoading,
     error,
     // Computed
     connectedSessions,
+    currentActiveSession,
     // Actions
     loadSessions,
     saveSessions,
@@ -260,6 +290,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     getConnectionStatus,
     openSession,
     closeSession,
+    switchToSession,
     initializeEventListeners,
   }
 })

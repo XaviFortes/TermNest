@@ -1,0 +1,95 @@
+<template>
+  <div 
+    class="context-menu" 
+    v-if="show"
+    :style="{ top: position.y + 'px', left: position.x + 'px' }"
+    @click.stop
+  >
+    <div class="context-menu-item" @click="$emit('connect')">
+      <span class="menu-icon">🔗</span>
+      Connect
+    </div>
+    <div class="context-menu-item" @click="$emit('edit')">
+      <span class="menu-icon">✏️</span>
+      Edit
+    </div>
+    <div class="context-menu-item" @click="$emit('duplicate')">
+      <span class="menu-icon">📋</span>
+      Duplicate
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item" @click="$emit('export')">
+      <span class="menu-icon">📤</span>
+      Export
+    </div>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-item danger" @click="$emit('delete')">
+      <span class="menu-icon">🗑️</span>
+      Delete
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+defineProps<{
+  show: boolean
+  position: { x: number; y: number }
+}>()
+
+defineEmits<{
+  connect: []
+  edit: []
+  duplicate: []
+  export: []
+  delete: []
+}>()
+</script>
+
+<style scoped>
+.context-menu {
+  position: fixed;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  z-index: 3000;
+  padding: 0.5rem 0;
+  min-width: 160px;
+  backdrop-filter: blur(10px);
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.context-menu-item:hover {
+  background: var(--bg-secondary);
+}
+
+.context-menu-item.danger {
+  color: #dc3545;
+}
+
+.context-menu-item.danger:hover {
+  background: rgba(220, 53, 69, 0.1);
+}
+
+.menu-icon {
+  font-size: 1rem;
+  width: 16px;
+  text-align: center;
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 0.5rem 0;
+}
+</style>

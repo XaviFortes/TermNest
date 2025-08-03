@@ -5,6 +5,7 @@ import { useSessionsStore } from './stores/sessions'
 import { useSettingsStore } from './stores/settings'
 import SessionManager from './components/SessionManager.vue'
 import SettingsModal from './components/SettingsModal.vue'
+import StatusBar from './components/StatusBar.vue'
 
 const sessionsStore = useSessionsStore()
 const settingsStore = useSettingsStore()
@@ -67,6 +68,9 @@ function closeSettings() {
           <button class="btn btn-primary" @click="openSettings">
             Settings
           </button>
+          <div class="keyboard-hint">
+            <span>⚡ Ctrl+Shift+P for Quick Actions</span>
+          </div>
         </div>
       </div>
     </header>
@@ -75,14 +79,7 @@ function closeSettings() {
       <SessionManager />
     </main>
 
-    <footer class="app-footer">
-      <div class="footer-content">
-        <span class="status-text">
-          {{ sessionsStore.connectedSessions.length }} connection(s) active
-        </span>
-        <span class="version-text">v0.1.0</span>
-      </div>
-    </footer>
+    <StatusBar />
 
     <!-- Settings Modal -->
     <SettingsModal
@@ -197,6 +194,23 @@ html, body {
 .header-actions {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
+}
+
+.keyboard-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  margin-left: 0.5rem;
+}
+
+.keyboard-hint span {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 /* Main Content */
@@ -204,24 +218,6 @@ html, body {
   flex: 1;
   overflow: hidden;
   min-height: 0; /* Important for flex child to shrink */
-}
-
-/* Footer */
-.app-footer {
-  background: var(--bg-secondary);
-  border-top: 1px solid var(--border-color);
-  padding: 0.5rem 1rem;
-  flex-shrink: 0;
-}
-
-.footer-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: 1200px;
-  margin: 0 auto;
-  font-size: 0.875rem;
-  color: var(--text-secondary);
 }
 
 /* Button Styles */

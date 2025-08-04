@@ -465,7 +465,6 @@ async fn list_directory_sftp_with_password(
 ) -> Result<Vec<FileItem>, String> {
     use ssh2::Session;
     use std::net::TcpStream;
-    use std::path::Path;
     
     // Connect to SSH server
     let tcp = TcpStream::connect(format!("{}:{}", host, port))

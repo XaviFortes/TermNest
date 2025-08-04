@@ -342,6 +342,8 @@ impl SshManager {
         }
     }
     
+
+    
     pub fn disconnect(&self, session_id: &str) -> Result<()> {
         let mut connections = self.connections.lock().unwrap();
         

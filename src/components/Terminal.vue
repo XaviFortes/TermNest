@@ -16,7 +16,7 @@
     </div>
     
     <div class="terminal-body">
-      <div class="terminal-wrapper">
+      <div class="terminal-wrapper" :class="{ 'full-width': !showSftp }">
         <!-- Connection Log (only shown when connecting) -->
         <div v-if="connectionStatus === 'connecting'" class="connection-log">
           <div class="connection-log-header">
@@ -613,39 +613,56 @@ function setupTerminal() {
   })
 
   
-  // Handle resize with debouncing
+  // Handle resize with debouncing - just fit the terminal to container
   let resizeTimeout: number | null = null
   const resizeObserver = new ResizeObserver(() => {
     if (resizeTimeout) {
       clearTimeout(resizeTimeout)
     }
-    resizeTimeout = window.setTimeout(() => {
+    resizeTimeout = window.setTimeout(async () => {
       if (fitAddon && terminal) {
         try {
           fitAddon.fit()
+          console.log(`Terminal fitted to container: ${terminal.cols}x${terminal.rows}`)
         } catch (error) {
           console.warn('Terminal resize failed:', error)
         }
       }
-    }, 50)
+    }, 100) // Increased debounce time for better performance
   })
   
   resizeObserver.observe(terminalContainer.value)
   
   // Also handle window resize
-  const handleWindowResize = () => {
+  const handleWindowResize = async () => {
     if (resizeTimeout) {
       clearTimeout(resizeTimeout)
     }
-    resizeTimeout = window.setTimeout(() => {
+    resizeTimeout = window.setTimeout(async () => {
       if (fitAddon && terminal) {
         try {
           fitAddon.fit()
+          
+          // Get terminal dimensions and notify backend
+          const cols = terminal.cols
+          const rows = terminal.rows
+          
+          // Send resize to backend
+          try {
+            await invoke('ssh_resize_terminal', {
+              sessionId: props.sessionId,
+              cols: cols,
+              rows: rows
+            })
+            console.log(`Terminal window resized to ${cols}x${rows}`)
+          } catch (error) {
+            console.warn('Failed to resize backend terminal on window resize:', error)
+          }
         } catch (error) {
           console.warn('Terminal window resize failed:', error)
         }
       }
-    }, 100)
+    }, 150) // Slightly longer delay for window resize
   }
   
   window.addEventListener('resize', handleWindowResize)
@@ -675,11 +692,25 @@ function toggleSftp() {
   if (showSftp.value) {
     refreshFiles()
   }
+  
+  // Resize terminal after SFTP panel toggle
+  setTimeout(() => {
+    if (fitAddon && terminal) {
+      fitAddon.fit()
+    }
+  }, 300) // Wait for animation to complete
 }
 
 function closeSftp() {
   showSftp.value = false
   hideContextMenu()
+  
+  // Resize terminal after closing SFTP
+  setTimeout(() => {
+    if (fitAddon && terminal) {
+      fitAddon.fit()
+    }
+  }, 100)
 }
 
 async function loadRemoteFiles() {
@@ -790,8 +821,33 @@ function getFileIcon(file: FileItem): string {
 
 // Context menu functions
 function showFileContextMenu(event: MouseEvent, file: FileItem) {
+  event.preventDefault()
   contextMenuFile.value = file
-  contextMenuPosition.value = { x: event.clientX, y: event.clientY }
+  
+  // Calculate position to prevent menu from going off-screen
+  const menuWidth = 200 // Approximate width of context menu
+  const menuHeight = 200 // Approximate height of context menu
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  
+  let x = event.clientX
+  let y = event.clientY
+  
+  // Adjust x position if menu would go off right edge
+  if (x + menuWidth > viewportWidth) {
+    x = viewportWidth - menuWidth - 10
+  }
+  
+  // Adjust y position if menu would go off bottom edge
+  if (y + menuHeight > viewportHeight) {
+    y = viewportHeight - menuHeight - 10
+  }
+  
+  // Ensure menu doesn't go off top or left edges
+  x = Math.max(5, x)
+  y = Math.max(5, y)
+  
+  contextMenuPosition.value = { x, y }
   showContextMenu.value = true
   
   // Close context menu when clicking elsewhere
@@ -1048,7 +1104,7 @@ function disconnect() {
 
 <style scoped>
 .terminal-container {
-  height: 100vh;
+  height: calc(100vh - 40px); /* Account for window titlebar and borders */
   display: flex;
   flex-direction: column;
   background: #1e1e1e;
@@ -1072,6 +1128,7 @@ function disconnect() {
   display: flex;
   overflow: hidden;
   min-height: 0;
+  height: calc(100vh - 120px); /* Account for titlebar + header + some padding */
 }
 
 .terminal-wrapper {
@@ -1079,7 +1136,13 @@ function disconnect() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-width: 300px; /* Ensure minimum usable width */
+  min-width: 200px;
+  /* Remove max-width constraint - let it use full space when SFTP is closed */
+}
+
+.terminal-wrapper.full-width {
+  width: 100%;
+  max-width: 100%;
 }
 
 .terminal-title {
@@ -1246,6 +1309,8 @@ function disconnect() {
   overflow: hidden; /* Let xterm.js handle scrolling */
   cursor: text;
   min-height: 0; /* Important for flex child */
+  height: 100%; /* Ensure full height usage */
+  max-height: calc(100vh - 160px); /* Reserve space for header and controls, prevent bottom overflow */
 }
 
 .terminal-simulation {
@@ -1281,9 +1346,9 @@ function disconnect() {
 }
 
 .sftp-panel {
-  width: 400px;
-  min-width: 350px;
-  max-width: 500px;
+  width: 350px;
+  min-width: 250px;
+  max-width: min(450px, 40vw); /* Responsive width based on viewport */
   background: #2d2d2d;
   border-left: 2px solid #404040;
   display: flex;
@@ -1297,8 +1362,9 @@ function disconnect() {
 }
 
 .sftp-panel.compact {
-  width: 250px;
-  min-width: 200px;
+  width: 200px;
+  min-width: 180px;
+  max-width: min(250px, 30vw); /* Responsive compact width */
 }
 
 @keyframes slideIn {
@@ -1307,7 +1373,7 @@ function disconnect() {
     opacity: 0;
   }
   to {
-    width: 400px;
+    width: 350px;
     opacity: 1;
   }
 }
@@ -1420,7 +1486,7 @@ function disconnect() {
   border: 1px solid #555;
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  z-index: 1000;
+  z-index: 9999;
   min-width: 200px;
   max-width: 300px;
   padding: 0.5rem 0;
@@ -1814,5 +1880,57 @@ function disconnect() {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+/* Custom Scrollbars for Dark Theme */
+:deep(*) {
+  scrollbar-width: thin;
+  scrollbar-color: #555 #2d2d2d;
+}
+
+:deep(*::-webkit-scrollbar) {
+  width: 8px;
+  height: 8px;
+}
+
+:deep(*::-webkit-scrollbar-track) {
+  background: #2d2d2d;
+  border-radius: 4px;
+}
+
+:deep(*::-webkit-scrollbar-thumb) {
+  background: #555;
+  border-radius: 4px;
+  border: 1px solid #2d2d2d;
+}
+
+:deep(*::-webkit-scrollbar-thumb:hover) {
+  background: #666;
+}
+
+:deep(*::-webkit-scrollbar-thumb:active) {
+  background: #777;
+}
+
+:deep(*::-webkit-scrollbar-corner) {
+  background: #2d2d2d;
+}
+
+/* File browser specific scrollbar */
+.file-browser :deep(*::-webkit-scrollbar-thumb) {
+  background: #404040;
+}
+
+.file-browser :deep(*::-webkit-scrollbar-thumb:hover) {
+  background: #505050;
+}
+
+/* Terminal output scrollbar */
+.terminal-container :deep(*::-webkit-scrollbar-thumb) {
+  background: #404040;
+}
+
+.terminal-container :deep(*::-webkit-scrollbar-thumb:hover) {
+  background: #505050;
 }
 </style>

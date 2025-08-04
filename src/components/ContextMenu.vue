@@ -72,11 +72,13 @@ defineEmits<{
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-  z-index: 3000;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+  z-index: 9999;
   padding: 0.5rem 0;
   min-width: 160px;
+  max-width: 250px;
   backdrop-filter: blur(10px);
+  overflow: hidden;
 }
 
 .context-menu-item {

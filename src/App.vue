@@ -268,4 +268,55 @@ html, body {
 .success {
   color: #28a745;
 }
+
+/* Global Custom Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) var(--bg-primary);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+  border: 1px solid var(--bg-primary);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+*::-webkit-scrollbar-thumb:active {
+  background: var(--text-primary);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--bg-primary);
+}
+
+/* Dark theme specific scrollbar adjustments */
+.theme-dark *::-webkit-scrollbar-thumb {
+  background: #555;
+}
+
+.theme-dark *::-webkit-scrollbar-thumb:hover {
+  background: #666;
+}
+
+.theme-dark *::-webkit-scrollbar-thumb:active {
+  background: #777;
+}
+
+.theme-dark *::-webkit-scrollbar-track {
+  background: #2d2d2d;
+}
 </style>

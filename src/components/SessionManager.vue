@@ -120,8 +120,38 @@ function openSession(session: Session) {
 function showSessionContextMenu(event: MouseEvent, session: Session) {
   event.preventDefault()
   contextMenuSession.value = session
-  contextMenuPosition.value = { x: event.clientX, y: event.clientY }
+  
+  // Calculate position to prevent menu from going off-screen
+  // More accurate context menu dimensions (based on actual ContextMenu component)
+  const menuWidth = 180 // More accurate width
+  const menuHeight = 350 // Height including all menu items and separators
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  
+  let x = event.clientX
+  let y = event.clientY
+  
+  // Adjust x position if menu would go off right edge
+  if (x + menuWidth > viewportWidth) {
+    x = Math.max(5, viewportWidth - menuWidth - 10)
+  }
+  
+  // Adjust y position if menu would go off bottom edge
+  if (y + menuHeight > viewportHeight) {
+    y = Math.max(5, viewportHeight - menuHeight - 10)
+  }
+  
+  // Ensure menu doesn't go off top or left edges
+  x = Math.max(5, x)
+  y = Math.max(5, y)
+  
+  contextMenuPosition.value = { x, y }
   showContextMenu.value = true
+  
+  // Add click outside to close
+  setTimeout(() => {
+    document.addEventListener('click', hideContextMenu, { once: true })
+  })
 }
 
 function hideContextMenu() {
@@ -1043,6 +1073,49 @@ onUnmounted(() => {
   background: var(--text-accent);
   color: white;
   transform: scale(1.05);
+}
+
+/* Custom Scrollbars for Session Manager */
+:deep(*) {
+  scrollbar-width: thin;
+  scrollbar-color: #555 #2d2d2d;
+}
+
+:deep(*::-webkit-scrollbar) {
+  width: 8px;
+  height: 8px;
+}
+
+:deep(*::-webkit-scrollbar-track) {
+  background: #2d2d2d;
+  border-radius: 4px;
+}
+
+:deep(*::-webkit-scrollbar-thumb) {
+  background: #555;
+  border-radius: 4px;
+  border: 1px solid #2d2d2d;
+}
+
+:deep(*::-webkit-scrollbar-thumb:hover) {
+  background: #666;
+}
+
+:deep(*::-webkit-scrollbar-thumb:active) {
+  background: #777;
+}
+
+:deep(*::-webkit-scrollbar-corner) {
+  background: #2d2d2d;
+}
+
+/* Sessions list specific scrollbar */
+.sessions-list :deep(*::-webkit-scrollbar-thumb) {
+  background: #404040;
+}
+
+.sessions-list :deep(*::-webkit-scrollbar-thumb:hover) {
+  background: #505050;
 }
 
 /* Responsive design */

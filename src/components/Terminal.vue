@@ -166,6 +166,11 @@ const passwordDialogError = ref('')
 const isAuthenticating = ref(false)
 const pendingSessionConfig = ref<any>(null)
 
+// SFTP password handling
+const pendingPasswordResolve = ref<((password: string) => void) | null>(null)
+const pendingPasswordReject = ref<((error: Error) => void) | null>(null)
+const storedSessionPassword = ref<string | null>(null) // Store password for SFTP operations
+
 // Event listener cleanup
 let unlistenTerminalOutput: (() => void) | null = null
 let unlistenConnectionStatus: (() => void) | null = null
@@ -498,10 +503,23 @@ function closeSftp() {
 
 async function loadRemoteFiles() {
   try {
-    const result = await invoke('list_remote_directory', {
-      sessionId: props.sessionId,
-      path: currentPath.value
-    })
+    let result;
+    
+    if (isPasswordSession()) {
+      // Use stored password if available, otherwise prompt
+      const password = storedSessionPassword.value || await promptForPassword()
+      result = await invoke('list_remote_directory_with_password', {
+        sessionId: props.sessionId,
+        path: currentPath.value,
+        password: password
+      })
+    } else {
+      // Use regular command for key-based authentication
+      result = await invoke('list_remote_directory', {
+        sessionId: props.sessionId,
+        path: currentPath.value
+      })
+    }
     
     files.value = result as FileItem[]
   } catch (error) {
@@ -539,6 +557,56 @@ function formatFileSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
+// Helper function to get session config for SFTP operations
+function getSftpSessionConfig() {
+  // For additional connections, extract the original session ID
+  const originalSessionId = props.sessionId.includes('_conn_') 
+    ? props.sessionId.split('_conn_')[0] 
+    : props.sessionId
+    
+  const session = sessionsStore.sessions.find(s => s.id === originalSessionId)
+  if (!session) {
+    throw new Error('Session not found')
+  }
+  
+  return session
+}
+
+// Helper function to check if session uses password authentication
+function isPasswordSession(): boolean {
+  try {
+    const session = getSftpSessionConfig()
+    return session.auth_method === 'Password'
+  } catch {
+    return false
+  }
+}
+
+// Helper function to prompt for password
+function promptForPassword(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      showPasswordDialog.value = false
+      passwordDialogError.value = ''
+    }
+
+    const handlePasswordSubmit = (password: string) => {
+      cleanup()
+      resolve(password)
+    }
+
+    const handlePasswordCancel = () => {
+      cleanup()
+      reject(new Error('Password entry cancelled'))
+    }
+
+    // Set up the dialog
+    pendingPasswordResolve.value = handlePasswordSubmit
+    pendingPasswordReject.value = handlePasswordCancel
+    showPasswordDialog.value = true
+  })
+}
+
 async function downloadFile(file: FileItem) {
   try {
     appendOutput('Downloading ' + file.name + '...\n')
@@ -546,11 +614,25 @@ async function downloadFile(file: FileItem) {
     // For now, download to a simple path (user can specify where later)
     const downloadsPath = `./downloads/${file.name}`;
     
-    const result = await invoke('download_remote_file', {
-      sessionId: props.sessionId,
-      remotePath: file.path,
-      localPath: downloadsPath
-    })
+    let result;
+    
+    if (isPasswordSession()) {
+      // Use stored password if available, otherwise prompt
+      const password = storedSessionPassword.value || await promptForPassword()
+      result = await invoke('download_remote_file_with_password', {
+        sessionId: props.sessionId,
+        remotePath: file.path,
+        localPath: downloadsPath,
+        password: password
+      })
+    } else {
+      // Use regular command for key-based authentication
+      result = await invoke('download_remote_file', {
+        sessionId: props.sessionId,
+        remotePath: file.path,
+        localPath: downloadsPath
+      })
+    }
     
     appendOutput(result + '\n\n')
   } catch (error) {
@@ -563,10 +645,23 @@ async function deleteFile(file: FileItem) {
     try {
       appendOutput('Deleting ' + file.name + '...\n')
       
-      const result = await invoke('delete_remote_file', {
-        sessionId: props.sessionId,
-        remotePath: file.path
-      })
+      let result;
+      
+      if (isPasswordSession()) {
+        // Use stored password if available, otherwise prompt
+        const password = storedSessionPassword.value || await promptForPassword()
+        result = await invoke('delete_remote_file_with_password', {
+          sessionId: props.sessionId,
+          remotePath: file.path,
+          password: password
+        })
+      } else {
+        // Use regular command for key-based authentication
+        result = await invoke('delete_remote_file', {
+          sessionId: props.sessionId,
+          remotePath: file.path
+        })
+      }
       
       appendOutput(result + '\n\n')
       refreshFiles()
@@ -578,6 +673,13 @@ async function deleteFile(file: FileItem) {
 
 // Password authentication handlers
 async function handlePasswordAuthentication(password: string) {
+  // Check if this is for SFTP operation
+  if (pendingPasswordResolve.value) {
+    pendingPasswordResolve.value(password)
+    return
+  }
+  
+  // Otherwise, handle SSH authentication
   if (!pendingSessionConfig.value) return
   
   isAuthenticating.value = true
@@ -597,6 +699,9 @@ async function handlePasswordAuthentication(password: string) {
       config: config,
       password: password
     })
+    
+    // Store password for SFTP operations
+    storedSessionPassword.value = password
     
     // Success - close dialog and update status
     showPasswordDialog.value = false
@@ -620,6 +725,13 @@ async function handlePasswordAuthentication(password: string) {
 }
 
 function handlePasswordCancel() {
+  // Check if this is for SFTP operation
+  if (pendingPasswordReject.value) {
+    pendingPasswordReject.value(new Error('Password entry cancelled'))
+    return
+  }
+  
+  // Otherwise, handle SSH authentication cancellation
   showPasswordDialog.value = false
   connectionStatus.value = 'disconnected'
   sessionsStore.updateConnectionStatus({
@@ -634,6 +746,9 @@ function handlePasswordCancel() {
 
 function disconnect() {
   console.log('Disconnecting session:', props.sessionId)
+  
+  // Clear stored password for security
+  storedSessionPassword.value = null
   
   // Disconnect from SSH backend using new API
   invoke('ssh_disconnect', { sessionId: props.sessionId })

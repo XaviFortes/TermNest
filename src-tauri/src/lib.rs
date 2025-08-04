@@ -335,6 +335,26 @@ async fn list_remote_directory(
     list_directory_sftp(&session.host, session.port, &session.username, &session.auth_method, &path).await
 }
 
+#[tauri::command]
+async fn list_remote_directory_with_password(
+    state: State<'_, AppState>,
+    #[allow(non_snake_case)] session_id: String,
+    path: String,
+    password: String,
+) -> Result<Vec<FileItem>, String> {
+    // Get the session configuration and clone it to avoid lifetime issues
+    let session = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions.get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?
+            .clone()
+    };
+    
+    // Use password authentication for SFTP
+    let auth_method = AuthMethod::Password;
+    list_directory_sftp_with_password(&session.host, session.port, &session.username, &auth_method, &path, &password).await
+}
+
 async fn list_directory_sftp(
     host: &str,
     port: u16,
@@ -435,6 +455,175 @@ async fn list_directory_sftp(
     Ok(files)
 }
 
+async fn list_directory_sftp_with_password(
+    host: &str,
+    port: u16,
+    username: &str,
+    _auth_method: &AuthMethod,
+    path: &str,
+    password: &str,
+) -> Result<Vec<FileItem>, String> {
+    use ssh2::Session;
+    use std::net::TcpStream;
+    use std::path::Path;
+    
+    // Connect to SSH server
+    let tcp = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+    
+    let mut sess = Session::new()
+        .map_err(|e| format!("Failed to create session: {}", e))?;
+    
+    sess.set_tcp_stream(tcp);
+    sess.handshake()
+        .map_err(|e| format!("SSH handshake failed: {}", e))?;
+    
+    // Authenticate with password
+    sess.userauth_password(username, password)
+        .map_err(|e| format!("Password authentication failed: {}", e))?;
+    
+    if !sess.authenticated() {
+        return Err("Authentication failed".to_string());
+    }
+    
+    // Create SFTP channel
+    let sftp = sess.sftp()
+        .map_err(|e| format!("Failed to create SFTP channel: {}", e))?;
+    
+    // Read directory
+    let remote_path = std::path::Path::new(path);
+    let dir_entries = sftp.readdir(remote_path)
+        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    
+    let mut files = Vec::new();
+    
+    for (path_buf, stat) in dir_entries {
+        let name = path_buf.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        
+        let full_path = path_buf.to_str().unwrap_or("").to_string();
+        let is_directory = stat.is_dir();
+        let size = if is_directory { 0 } else { stat.size.unwrap_or(0) };
+        
+        // Format modification time
+        let modified = if let Some(mtime) = stat.mtime {
+            let datetime = chrono::DateTime::from_timestamp(mtime as i64, 0)
+                .unwrap_or_else(|| chrono::Utc::now());
+            datetime.format("%Y-%m-%d %H:%M").to_string()
+        } else {
+            "unknown".to_string()
+        };
+        
+        files.push(FileItem {
+            name,
+            path: full_path,
+            size,
+            is_directory,
+            modified,
+        });
+    }
+    
+    // Add parent directory entry if we're not at root
+    if path != "/" && path != "" {
+        let parent_path = std::path::Path::new(path)
+            .parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or("/")
+            .to_string();
+        
+        files.insert(0, FileItem {
+            name: "..".to_string(),
+            path: parent_path,
+            size: 0,
+            is_directory: true,
+            modified: "".to_string(),
+        });
+    }
+    
+    Ok(files)
+}
+
+async fn download_file_sftp_with_password(
+    host: &str,
+    port: u16,
+    username: &str,
+    remote_path: &str,
+    local_path: &str,
+    password: &str,
+) -> Result<String, String> {
+    use std::net::TcpStream;
+    use ssh2::Session;
+    
+    let tcp = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+    
+    let mut sess = Session::new()
+        .map_err(|e| format!("Failed to create session: {}", e))?;
+    
+    sess.set_tcp_stream(tcp);
+    sess.handshake()
+        .map_err(|e| format!("SSH handshake failed: {}", e))?;
+    
+    sess.userauth_password(username, password)
+        .map_err(|e| format!("SSH authentication failed: {}", e))?;
+    
+    if !sess.authenticated() {
+        return Err("Authentication failed".to_string());
+    }
+    
+    let sftp = sess.sftp()
+        .map_err(|e| format!("Failed to create SFTP session: {}", e))?;
+    
+    let mut remote_file = sftp.open(std::path::Path::new(remote_path))
+        .map_err(|e| format!("Failed to open remote file: {}", e))?;
+    
+    let mut local_file = std::fs::File::create(local_path)
+        .map_err(|e| format!("Failed to create local file: {}", e))?;
+    
+    std::io::copy(&mut remote_file, &mut local_file)
+        .map_err(|e| format!("Failed to copy file: {}", e))?;
+    
+    Ok(format!("File downloaded successfully to: {}", local_path))
+}
+
+async fn delete_file_sftp_with_password(
+    host: &str,
+    port: u16,
+    username: &str,
+    remote_path: &str,
+    password: &str,
+) -> Result<String, String> {
+    use std::net::TcpStream;
+    use ssh2::Session;
+    
+    let tcp = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+    
+    let mut sess = Session::new()
+        .map_err(|e| format!("Failed to create session: {}", e))?;
+    
+    sess.set_tcp_stream(tcp);
+    sess.handshake()
+        .map_err(|e| format!("SSH handshake failed: {}", e))?;
+    
+    sess.userauth_password(username, password)
+        .map_err(|e| format!("SSH authentication failed: {}", e))?;
+    
+    if !sess.authenticated() {
+        return Err("Authentication failed".to_string());
+    }
+    
+    let sftp = sess.sftp()
+        .map_err(|e| format!("Failed to create SFTP session: {}", e))?;
+    
+    sftp.unlink(std::path::Path::new(remote_path))
+        .map_err(|e| format!("Failed to delete file: {}", e))?;
+    
+    Ok(format!("File deleted successfully: {}", remote_path))
+}
+
 #[tauri::command]
 async fn download_remote_file(
     state: State<'_, AppState>,
@@ -451,6 +640,25 @@ async fn download_remote_file(
     };
     
     download_file_sftp(&session.host, session.port, &session.username, &session.auth_method, &remote_path, &local_path).await
+}
+
+#[tauri::command]
+async fn download_remote_file_with_password(
+    state: State<'_, AppState>,
+    #[allow(non_snake_case)] session_id: String,
+    remote_path: String,
+    local_path: String,
+    password: String,
+) -> Result<String, String> {
+    // Get the session configuration and clone it to avoid lifetime issues
+    let session = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions.get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?
+            .clone()
+    };
+    
+    download_file_sftp_with_password(&session.host, session.port, &session.username, &remote_path, &local_path, &password).await
 }
 
 async fn download_file_sftp(
@@ -531,6 +739,24 @@ async fn delete_remote_file(
     };
     
     delete_file_sftp(&session.host, session.port, &session.username, &session.auth_method, &remote_path).await
+}
+
+#[tauri::command]
+async fn delete_remote_file_with_password(
+    state: State<'_, AppState>,
+    #[allow(non_snake_case)] session_id: String,
+    remote_path: String,
+    password: String,
+) -> Result<String, String> {
+    // Get the session configuration and clone it to avoid lifetime issues
+    let session = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions.get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?
+            .clone()
+    };
+    
+    delete_file_sftp_with_password(&session.host, session.port, &session.username, &remote_path, &password).await
 }
 
 async fn delete_file_sftp(
@@ -619,8 +845,11 @@ pub fn run() {
             disconnect_session,
             send_terminal_input,
             list_remote_directory,
+            list_remote_directory_with_password,
             download_remote_file,
+            download_remote_file_with_password,
             delete_remote_file,
+            delete_remote_file_with_password,
             browse_ssh_key,
             ssh_new::ssh_connect,
             ssh_new::ssh_connect_with_password,

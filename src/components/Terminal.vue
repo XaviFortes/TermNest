@@ -15,78 +15,163 @@
       </div>
     </div>
     
-    <div class="terminal-wrapper">
-      <!-- Connection Log (only shown when connecting) -->
-      <div v-if="connectionStatus === 'connecting'" class="connection-log">
-        <div class="connection-log-header">
-          <div class="connection-spinner"></div>
-          <h4>Establishing SSH Connection</h4>
-        </div>
-        <div class="connection-steps">
-          <div 
-            v-for="(step, index) in connectionSteps" 
-            :key="index"
-            class="connection-step"
-            :class="{ 'active': index === currentStepIndex, 'completed': index < currentStepIndex }"
-          >
-            <div class="step-indicator">
-              <span v-if="index < currentStepIndex" class="step-check">✓</span>
-              <span v-else-if="index === currentStepIndex" class="step-spinner">⟳</span>
-              <span v-else class="step-pending">○</span>
-            </div>
-            <div class="step-text">{{ step }}</div>
+    <div class="terminal-body">
+      <div class="terminal-wrapper">
+        <!-- Connection Log (only shown when connecting) -->
+        <div v-if="connectionStatus === 'connecting'" class="connection-log">
+          <div class="connection-log-header">
+            <div class="connection-spinner"></div>
+            <h4>Establishing SSH Connection</h4>
           </div>
-        </div>
-        <div v-if="currentStepMessage" class="current-step-message">
-          {{ currentStepMessage }}
-        </div>
-      </div>
-
-      <!-- Terminal Content -->
-      <div 
-        ref="terminalContainer" 
-        class="terminal-content"
-        :class="{ 'with-connection-log': connectionStatus === 'connecting' }"
-        @click="focusTerminal"
-      >
-        <!-- XTerm.js will be mounted here -->
-      </div>
-    </div>
-    
-    <!-- SFTP Panel -->
-    <div v-if="showSftp" class="sftp-panel">
-      <div class="sftp-header">
-        <h3>File Manager</h3>
-        <button @click="closeSftp" class="btn btn-sm">×</button>
-      </div>
-      <div class="sftp-content">
-        <div class="file-browser">
-          <div class="path-bar">
-            <input v-model="currentPath" @keyup.enter="navigateToPath" class="form-control" />
-            <button @click="refreshFiles" class="btn btn-sm">Refresh</button>
-          </div>
-          <div class="file-list">
+          <div class="connection-steps">
             <div 
-              v-for="file in files" 
-              :key="file.path"
-              class="file-item"
-              :class="{ 'is-directory': file.is_directory }"
-              @dblclick="handleFileAction(file)"
+              v-for="(step, index) in connectionSteps" 
+              :key="index"
+              class="connection-step"
+              :class="{ 'active': index === currentStepIndex, 'completed': index < currentStepIndex }"
             >
-              <span class="file-icon">
-                {{ file.is_directory ? '📁' : '📄' }}
-              </span>
-              <span class="file-name">{{ file.name }}</span>
-              <span class="file-size" v-if="!file.is_directory">
-                {{ formatFileSize(file.size) }}
-              </span>
-              <div class="file-actions">
-                <button @click="downloadFile(file)" v-if="!file.is_directory" class="btn btn-xs">
-                  Download
+              <div class="step-indicator">
+                <span v-if="index < currentStepIndex" class="step-check">✓</span>
+                <span v-else-if="index === currentStepIndex" class="step-spinner">⟳</span>
+                <span v-else class="step-pending">○</span>
+              </div>
+              <div class="step-text">{{ step }}</div>
+            </div>
+          </div>
+          <div v-if="currentStepMessage" class="current-step-message">
+            {{ currentStepMessage }}
+          </div>
+        </div>
+
+        <!-- Terminal Content -->
+        <div 
+          ref="terminalContainer" 
+          class="terminal-content"
+          :class="{ 'with-connection-log': connectionStatus === 'connecting' }"
+          @click="focusTerminal"
+        >
+          <!-- XTerm.js will be mounted here -->
+        </div>
+      </div>
+      
+      <!-- SFTP Panel -->
+      <div v-if="showSftp" class="sftp-panel">
+        <div class="sftp-header">
+          <div class="sftp-title">
+            <h3>📁 File Manager</h3>
+            <span class="file-count">{{ files.length }} items</span>
+          </div>
+          <div class="sftp-actions">
+            <button @click="refreshFiles" class="btn btn-sm btn-refresh" title="Refresh">
+              🔄
+            </button>
+            <button @click="closeSftp" class="btn btn-sm btn-close" title="Close">×</button>
+          </div>
+        </div>
+        
+        <div class="sftp-content">
+          <div class="file-browser">
+            <!-- Path Navigation -->
+            <div class="path-bar">
+              <div class="path-breadcrumb">
+                <span v-for="(segment, index) in pathSegments" :key="index" class="breadcrumb-item">
+                  <button 
+                    @click="navigateToSegment(index)" 
+                    class="breadcrumb-btn"
+                    :class="{ active: index === pathSegments.length - 1 }"
+                  >
+                    {{ segment || '/' }}
+                  </button>
+                  <span v-if="index < pathSegments.length - 1" class="breadcrumb-separator">/</span>
+                </span>
+              </div>
+              <div class="path-controls">
+                <input 
+                  v-model="currentPath" 
+                  @keyup.enter="navigateToPath" 
+                  class="path-input" 
+                  placeholder="Enter path..."
+                  title="Press Enter to navigate"
+                />
+                <button @click="navigateUp" class="btn btn-sm btn-up" title="Go up one directory" :disabled="currentPath === '/'">
+                  ⬆️
                 </button>
-                <button @click="deleteFile(file)" class="btn btn-xs btn-danger">
-                  Delete
-                </button>
+              </div>
+            </div>
+            
+            <!-- File List with Enhanced Scrolling -->
+            <div class="file-list-container">
+              <div v-if="files.length === 0" class="empty-state">
+                <div class="empty-icon">📂</div>
+                <div class="empty-text">No files found</div>
+                <button @click="refreshFiles" class="btn btn-sm">Refresh</button>
+              </div>
+              
+              <div v-else class="file-list">
+                <div class="file-list-header">
+                  <div class="col-name">Name</div>
+                  <div class="col-size">Size</div>
+                  <div class="col-modified">Modified</div>
+                  <div class="col-actions">Actions</div>
+                </div>
+                
+                <div class="file-list-body">
+                  <div 
+                    v-for="file in files" 
+                    :key="file.path"
+                    class="file-item"
+                    :class="{ 
+                      'is-directory': file.is_directory,
+                      'is-parent': file.name === '..'
+                    }"
+                    @dblclick="handleFileAction(file)"
+                    @click="selectFile(file)"
+                    :title="file.path"
+                  >
+                    <div class="file-info">
+                      <span class="file-icon">
+                        {{ getFileIcon(file) }}
+                      </span>
+                      <span class="file-name">{{ file.name }}</span>
+                    </div>
+                    <div class="file-size">
+                      {{ file.is_directory ? '-' : formatFileSize(file.size) }}
+                    </div>
+                    <div class="file-modified">
+                      {{ file.modified || '-' }}
+                    </div>
+                    <div class="file-actions">
+                      <button 
+                        v-if="!file.is_directory && file.name !== '..'" 
+                        @click.stop="downloadFile(file)" 
+                        class="btn btn-xs btn-download"
+                        title="Download file"
+                      >
+                        ⬇️
+                      </button>
+                      <button 
+                        v-if="file.name !== '..'" 
+                        @click.stop="deleteFile(file)" 
+                        class="btn btn-xs btn-danger"
+                        title="Delete"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Status Bar -->
+            <div class="sftp-status">
+              <div class="status-info">
+                <span class="current-path">{{ currentPath }}</span>
+              </div>
+              <div class="status-actions">
+                <span class="connection-status">
+                  {{ connectionStatus === 'connected' ? '🟢 Connected' : '🔴 Disconnected' }}
+                </span>
               </div>
             </div>
           </div>
@@ -108,7 +193,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useSessionsStore } from '../stores/sessions'
@@ -159,6 +244,7 @@ const currentStepMessage = ref('')
 const showSftp = ref(false)
 const currentPath = ref('/')
 const files = ref<FileItem[]>([])
+const selectedFile = ref<FileItem | null>(null)
 
 // Password dialog state
 const showPasswordDialog = ref(false)
@@ -557,6 +643,55 @@ function formatFileSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
+// Computed property for path breadcrumbs
+const pathSegments = computed(() => {
+  if (currentPath.value === '/') return ['/']
+  return currentPath.value.split('/').filter(segment => segment !== '')
+})
+
+// Enhanced file browser functions
+function navigateToSegment(index: number) {
+  if (index === 0 && pathSegments.value[0] === '/') {
+    currentPath.value = '/'
+  } else {
+    currentPath.value = '/' + pathSegments.value.slice(0, index + 1).join('/')
+  }
+  navigateToPath()
+}
+
+function navigateUp() {
+  if (currentPath.value === '/') return
+  const parentPath = currentPath.value.substring(0, currentPath.value.lastIndexOf('/'))
+  currentPath.value = parentPath || '/'
+  navigateToPath()
+}
+
+function selectFile(file: FileItem) {
+  selectedFile.value = file
+}
+
+function getFileIcon(file: FileItem): string {
+  if (file.name === '..') return '⬅️'
+  if (file.is_directory) return '📁'
+  
+  // Determine icon based on file extension
+  const ext = file.name.split('.').pop()?.toLowerCase()
+  switch (ext) {
+    case 'txt': case 'md': case 'log': return '📄'
+    case 'js': case 'ts': case 'json': return '📜'
+    case 'html': case 'css': case 'xml': return '🌐'
+    case 'py': case 'rb': case 'php': return '🐍'
+    case 'jpg': case 'jpeg': case 'png': case 'gif': case 'svg': return '🖼️'
+    case 'pdf': return '📕'
+    case 'zip': case 'tar': case 'gz': case '7z': return '📦'
+    case 'mp3': case 'wav': case 'flac': return '🎵'
+    case 'mp4': case 'avi': case 'mkv': return '🎬'
+    case 'sh': case 'bash': case 'zsh': return '⚡'
+    case 'conf': case 'cfg': case 'ini': return '⚙️'
+    default: return '📄'
+  }
+}
+
 // Helper function to get session config for SFTP operations
 function getSftpSessionConfig() {
   // For additional connections, extract the original session ID
@@ -774,12 +909,13 @@ function disconnect() {
 
 <style scoped>
 .terminal-container {
-  height: 100%;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: #1e1e1e;
   color: #ffffff;
   font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+  overflow: hidden;
 }
 
 .terminal-header {
@@ -789,7 +925,22 @@ function disconnect() {
   padding: 0.75rem 1rem;
   background: #2d2d2d;
   border-bottom: 1px solid #404040;
-  flex-shrink: 0; /* Prevent header from shrinking */
+  flex-shrink: 0;
+}
+
+.terminal-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.terminal-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 300px; /* Ensure minimum usable width */
 }
 
 .terminal-title {
@@ -991,11 +1142,29 @@ function disconnect() {
 }
 
 .sftp-panel {
-  width: 350px;
+  width: 400px;
+  min-width: 350px;
+  max-width: 500px;
   background: #2d2d2d;
-  border-left: 1px solid #404040;
+  border-left: 2px solid #404040;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
+  height: 100%;
+  overflow: hidden;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.3);
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    width: 0;
+    opacity: 0;
+  }
+  to {
+    width: 400px;
+    opacity: 1;
+  }
 }
 
 .sftp-header {
@@ -1005,17 +1174,36 @@ function disconnect() {
   padding: 0.75rem 1rem;
   background: #404040;
   border-bottom: 1px solid #555;
+  flex-shrink: 0;
 }
 
-.sftp-header h3 {
+.sftp-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.sftp-title h3 {
   margin: 0;
   font-size: 0.875rem;
   font-weight: 600;
 }
 
+.file-count {
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.sftp-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .sftp-content {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .file-browser {
@@ -1025,14 +1213,59 @@ function disconnect() {
 }
 
 .path-bar {
-  display: flex;
-  gap: 0.5rem;
   padding: 0.75rem;
   background: #353535;
   border-bottom: 1px solid #555;
+  flex-shrink: 0;
 }
 
-.path-bar input {
+.path-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding-bottom: 0.25rem;
+}
+
+.breadcrumb-item {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.breadcrumb-btn {
+  background: #1e1e1e;
+  border: 1px solid #555;
+  color: #fff;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.breadcrumb-btn:hover {
+  background: #404040;
+}
+
+.breadcrumb-btn.active {
+  background: #0d6efd;
+  border-color: #0d6efd;
+}
+
+.breadcrumb-separator {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.path-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.path-input {
   flex: 1;
   background: #1e1e1e;
   border: 1px solid #555;
@@ -1042,19 +1275,92 @@ function disconnect() {
   font-size: 0.75rem;
 }
 
+.path-input:focus {
+  outline: none;
+  border-color: #0d6efd;
+}
+
+.file-list-container {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 1rem;
+  color: #888;
+}
+
+.empty-icon {
+  font-size: 2rem;
+}
+
+.empty-text {
+  font-size: 0.875rem;
+}
+
 .file-list {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.file-list-header {
+  display: grid;
+  grid-template-columns: 1fr 80px 100px 80px;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #404040;
+  border-bottom: 1px solid #555;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #ccc;
+  flex-shrink: 0;
+}
+
+.file-list-body {
+  flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+/* Custom scrollbar for file list */
+.file-list-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.file-list-body::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.file-list-body::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.file-list-body::-webkit-scrollbar-thumb:hover {
+  background: #777;
 }
 
 .file-item {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr 80px 100px 80px;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid #404040;
   cursor: pointer;
   font-size: 0.75rem;
+  align-items: center;
+  transition: background-color 0.2s;
 }
 
 .file-item:hover {
@@ -1065,13 +1371,26 @@ function disconnect() {
   font-weight: 500;
 }
 
+.file-item.is-parent {
+  background: #2a2a2a;
+  font-weight: 600;
+  color: #ffd700;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+
 .file-icon {
   width: 16px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .file-name {
-  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1080,17 +1399,51 @@ function disconnect() {
 .file-size {
   color: #888;
   font-size: 0.7rem;
+  text-align: right;
+}
+
+.file-modified {
+  color: #888;
+  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-actions {
   display: flex;
   gap: 0.25rem;
+  justify-content: center;
   opacity: 0;
   transition: opacity 0.2s;
 }
 
 .file-item:hover .file-actions {
   opacity: 1;
+}
+
+.sftp-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: #353535;
+  border-top: 1px solid #555;
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.current-path {
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.connection-status {
+  color: #888;
+  white-space: nowrap;
 }
 
 .btn {
@@ -1124,6 +1477,41 @@ function disconnect() {
 
 .btn-danger:hover {
   background: #c82333;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-refresh {
+  background: #28a745;
+}
+
+.btn-refresh:hover {
+  background: #218838;
+}
+
+.btn-close {
+  background: #dc3545;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.btn-up {
+  background: #6c757d;
+}
+
+.btn-up:hover {
+  background: #5a6268;
+}
+
+.btn-download {
+  background: #17a2b8;
+}
+
+.btn-download:hover {
+  background: #138496;
 }
 
 .form-control {

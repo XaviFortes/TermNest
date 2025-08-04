@@ -542,8 +542,17 @@ function formatFileSize(bytes: number): string {
 async function downloadFile(file: FileItem) {
   try {
     appendOutput('Downloading ' + file.name + '...\n')
-    // Implementation would go here
-    appendOutput('Download completed\n\n')
+    
+    // For now, download to a simple path (user can specify where later)
+    const downloadsPath = `./downloads/${file.name}`;
+    
+    const result = await invoke('download_remote_file', {
+      sessionId: props.sessionId,
+      remotePath: file.path,
+      localPath: downloadsPath
+    })
+    
+    appendOutput(result + '\n\n')
   } catch (error) {
     appendOutput('Download failed: ' + error + '\n\n')
   }
@@ -553,8 +562,13 @@ async function deleteFile(file: FileItem) {
   if (confirm('Are you sure you want to delete ' + file.name + '?')) {
     try {
       appendOutput('Deleting ' + file.name + '...\n')
-      // Implementation would go here
-      appendOutput('File deleted\n\n')
+      
+      const result = await invoke('delete_remote_file', {
+        sessionId: props.sessionId,
+        remotePath: file.path
+      })
+      
+      appendOutput(result + '\n\n')
       refreshFiles()
     } catch (error) {
       appendOutput('Delete failed: ' + error + '\n\n')

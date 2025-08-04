@@ -319,12 +319,280 @@ async fn browse_ssh_key(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn list_remote_directory(
-    _state: State<'_, AppState>,
-    #[allow(non_snake_case)] _sessionId: String,
-    _path: String,
+    state: State<'_, AppState>,
+    #[allow(non_snake_case)] session_id: String,
+    path: String,
 ) -> Result<Vec<FileItem>, String> {
-    // SFTP functionality not implemented in new SSH manager yet
-    Err("SFTP functionality not implemented yet".to_string())
+    // Get the session configuration and clone it to avoid lifetime issues
+    let session = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions.get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?
+            .clone()
+    };
+    
+    // Create SFTP connection using the session's configuration
+    list_directory_sftp(&session.host, session.port, &session.username, &session.auth_method, &path).await
+}
+
+async fn list_directory_sftp(
+    host: &str,
+    port: u16,
+    username: &str,
+    auth_method: &AuthMethod,
+    path: &str,
+) -> Result<Vec<FileItem>, String> {
+    use ssh2::{Session};
+    use std::net::TcpStream;
+    use std::path::Path;
+    
+    // Connect to SSH server
+    let tcp = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+    
+    let mut sess = Session::new()
+        .map_err(|e| format!("Failed to create session: {}", e))?;
+    
+    sess.set_tcp_stream(tcp);
+    sess.handshake()
+        .map_err(|e| format!("SSH handshake failed: {}", e))?;
+    
+    // Authenticate
+    match auth_method {
+        AuthMethod::Password => {
+            return Err("Password authentication requires interactive input for SFTP".to_string());
+        }
+        AuthMethod::PublicKey { key_path } => {
+            sess.userauth_pubkey_file(username, None, Path::new(key_path), None)
+                .map_err(|e| format!("Public key authentication failed: {}", e))?;
+        }
+        AuthMethod::Agent => {
+            sess.userauth_agent(username)
+                .map_err(|e| format!("Agent authentication failed: {}", e))?;
+        }
+    }
+    
+    if !sess.authenticated() {
+        return Err("Authentication failed".to_string());
+    }
+    
+    // Create SFTP channel
+    let sftp = sess.sftp()
+        .map_err(|e| format!("Failed to create SFTP channel: {}", e))?;
+    
+    // Read directory
+    let remote_path = std::path::Path::new(path);
+    let dir_entries = sftp.readdir(remote_path)
+        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    
+    let mut files = Vec::new();
+    
+    for (path_buf, stat) in dir_entries {
+        let name = path_buf.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        
+        let full_path = path_buf.to_str().unwrap_or("").to_string();
+        let is_directory = stat.is_dir();
+        let size = if is_directory { 0 } else { stat.size.unwrap_or(0) };
+        
+        // Format modification time
+        let modified = if let Some(mtime) = stat.mtime {
+            let datetime = chrono::DateTime::from_timestamp(mtime as i64, 0)
+                .unwrap_or_else(|| chrono::Utc::now());
+            datetime.format("%Y-%m-%d %H:%M").to_string()
+        } else {
+            "unknown".to_string()
+        };
+        
+        files.push(FileItem {
+            name,
+            path: full_path,
+            size,
+            is_directory,
+            modified,
+        });
+    }
+    
+    // Add parent directory entry if we're not at root
+    if path != "/" && path != "" {
+        let parent_path = std::path::Path::new(path)
+            .parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or("/")
+            .to_string();
+        
+        files.insert(0, FileItem {
+            name: "..".to_string(),
+            path: parent_path,
+            size: 0,
+            is_directory: true,
+            modified: "".to_string(),
+        });
+    }
+    
+    Ok(files)
+}
+
+#[tauri::command]
+async fn download_remote_file(
+    state: State<'_, AppState>,
+    #[allow(non_snake_case)] session_id: String,
+    remote_path: String,
+    local_path: String,
+) -> Result<String, String> {
+    // Get the session configuration and clone it to avoid lifetime issues
+    let session = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions.get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?
+            .clone()
+    };
+    
+    download_file_sftp(&session.host, session.port, &session.username, &session.auth_method, &remote_path, &local_path).await
+}
+
+async fn download_file_sftp(
+    host: &str,
+    port: u16,
+    username: &str,
+    auth_method: &AuthMethod,
+    remote_path: &str,
+    local_path: &str,
+) -> Result<String, String> {
+    use ssh2::Session;
+    use std::fs::File;
+    use std::io::copy;
+    use std::net::TcpStream;
+    use std::path::Path;
+    
+    // Connect to SSH server
+    let tcp = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+    
+    let mut sess = Session::new()
+        .map_err(|e| format!("Failed to create session: {}", e))?;
+    
+    sess.set_tcp_stream(tcp);
+    sess.handshake()
+        .map_err(|e| format!("SSH handshake failed: {}", e))?;
+    
+    // Authenticate
+    match auth_method {
+        AuthMethod::Password => {
+            return Err("Password authentication requires interactive input for SFTP".to_string());
+        }
+        AuthMethod::PublicKey { key_path } => {
+            sess.userauth_pubkey_file(username, None, Path::new(key_path), None)
+                .map_err(|e| format!("Public key authentication failed: {}", e))?;
+        }
+        AuthMethod::Agent => {
+            sess.userauth_agent(username)
+                .map_err(|e| format!("Agent authentication failed: {}", e))?;
+        }
+    }
+    
+    if !sess.authenticated() {
+        return Err("Authentication failed".to_string());
+    }
+    
+    // Create SFTP channel
+    let sftp = sess.sftp()
+        .map_err(|e| format!("Failed to create SFTP channel: {}", e))?;
+    
+    // Open remote file
+    let mut remote_file = sftp.open(Path::new(remote_path))
+        .map_err(|e| format!("Failed to open remote file: {}", e))?;
+    
+    // Create local file
+    let mut local_file = File::create(local_path)
+        .map_err(|e| format!("Failed to create local file: {}", e))?;
+    
+    // Copy data
+    let bytes_copied = copy(&mut remote_file, &mut local_file)
+        .map_err(|e| format!("Failed to copy data: {}", e))?;
+    
+    Ok(format!("Downloaded {} bytes to {}", bytes_copied, local_path))
+}
+
+#[tauri::command]
+async fn delete_remote_file(
+    state: State<'_, AppState>,
+    #[allow(non_snake_case)] session_id: String,
+    remote_path: String,
+) -> Result<String, String> {
+    // Get the session configuration and clone it to avoid lifetime issues
+    let session = {
+        let sessions = state.sessions.lock().unwrap();
+        sessions.get(&session_id)
+            .ok_or_else(|| "Session not found".to_string())?
+            .clone()
+    };
+    
+    delete_file_sftp(&session.host, session.port, &session.username, &session.auth_method, &remote_path).await
+}
+
+async fn delete_file_sftp(
+    host: &str,
+    port: u16,
+    username: &str,
+    auth_method: &AuthMethod,
+    remote_path: &str,
+) -> Result<String, String> {
+    use ssh2::Session;
+    use std::net::TcpStream;
+    use std::path::Path;
+    
+    // Connect to SSH server
+    let tcp = TcpStream::connect(format!("{}:{}", host, port))
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+    
+    let mut sess = Session::new()
+        .map_err(|e| format!("Failed to create session: {}", e))?;
+    
+    sess.set_tcp_stream(tcp);
+    sess.handshake()
+        .map_err(|e| format!("SSH handshake failed: {}", e))?;
+    
+    // Authenticate
+    match auth_method {
+        AuthMethod::Password => {
+            return Err("Password authentication requires interactive input for SFTP".to_string());
+        }
+        AuthMethod::PublicKey { key_path } => {
+            sess.userauth_pubkey_file(username, None, Path::new(key_path), None)
+                .map_err(|e| format!("Public key authentication failed: {}", e))?;
+        }
+        AuthMethod::Agent => {
+            sess.userauth_agent(username)
+                .map_err(|e| format!("Agent authentication failed: {}", e))?;
+        }
+    }
+    
+    if !sess.authenticated() {
+        return Err("Authentication failed".to_string());
+    }
+    
+    // Create SFTP channel
+    let sftp = sess.sftp()
+        .map_err(|e| format!("Failed to create SFTP channel: {}", e))?;
+    
+    // Check if it's a directory or file
+    let stat = sftp.stat(Path::new(remote_path))
+        .map_err(|e| format!("Failed to stat remote path: {}", e))?;
+    
+    if stat.is_dir() {
+        // Remove directory
+        sftp.rmdir(Path::new(remote_path))
+            .map_err(|e| format!("Failed to remove directory: {}", e))?;
+        Ok(format!("Directory {} removed successfully", remote_path))
+    } else {
+        // Remove file
+        sftp.unlink(Path::new(remote_path))
+            .map_err(|e| format!("Failed to remove file: {}", e))?;
+        Ok(format!("File {} removed successfully", remote_path))
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -351,6 +619,8 @@ pub fn run() {
             disconnect_session,
             send_terminal_input,
             list_remote_directory,
+            download_remote_file,
+            delete_remote_file,
             browse_ssh_key,
             ssh_new::ssh_connect,
             ssh_new::ssh_connect_with_password,

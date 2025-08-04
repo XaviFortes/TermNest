@@ -33,6 +33,13 @@ struct TerminalEvent {
     data: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct ConnectionStatusEvent {
+    session_id: String,
+    status: String,
+    message: Option<String>,
+}
+
 // Separate reader and writer handles to avoid mutex contention
 pub struct SshConnection {
     session_id: String,
@@ -98,7 +105,8 @@ impl SshConnection {
                     Err(e) => {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             // Non-blocking read with no data, sleep briefly
-                            thread::sleep(Duration::from_millis(10));
+                            // Use shorter sleep for better responsiveness to initial output
+                            thread::sleep(Duration::from_millis(1));
                             continue;
                         }
                         eprintln!("SSH read error: {}", e);
@@ -319,12 +327,24 @@ impl SshManager {
         println!("SSH channel established for {}", session_id);
         
         // Create connection wrapper
-        let connection = SshConnection::new(session_id.clone(), channel, app_handle)?;
+        let connection = SshConnection::new(session_id.clone(), channel, app_handle.clone())?;
+        
+        // Give the shell a moment to initialize and send initial output
+        std::thread::sleep(std::time::Duration::from_millis(200));
         
         // Store connection
         {
             let mut connections = self.connections.lock().unwrap();
             connections.insert(session_id.clone(), connection);
+        }
+        
+        // Emit connected status
+        if let Err(e) = app_handle.emit("connection_status", &ConnectionStatusEvent {
+            session_id: session_id.clone(),
+            status: "connected".to_string(),
+            message: Some("Connection established".to_string()),
+        }) {
+            eprintln!("Failed to emit connection status: {}", e);
         }
         
         println!("SSH connection {} ready", session_id);

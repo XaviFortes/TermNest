@@ -355,8 +355,8 @@ let unlistenConnectionStatus: (() => void) | null = null
 // Initialize terminal
 onMounted(async () => {
   setupTerminal()
+  await setupEventListeners()  // Set up listeners BEFORE connecting
   await initializeTerminal()
-  await setupEventListeners()
   focusTerminal()
 })
 

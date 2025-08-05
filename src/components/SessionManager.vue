@@ -391,9 +391,12 @@ onUnmounted(() => {
         <button class="btn btn-primary btn-sm" @click="openSettings">
           Settings
         </button>
-        <div class="keyboard-hint">
+        <button class="btn btn-sm keyboard-hint"
+          @click="showQuickActions = !showQuickActions"
+          :title="'Quick Actions (Ctrl+Shift+P)'"
+        >
           <span>⚡ Ctrl+Shift+P</span>
-        </div>
+        </button>
       </div>
     </div>
 
@@ -512,7 +515,7 @@ onUnmounted(() => {
 
       <!-- Main Content Area -->
       <div class="main-content">
-        <div class="main-header">
+        <!-- <div class="main-header">
           <div class="main-title">
             <h2 v-if="sessionsStore.activeSessions.length === 0">Welcome to TermNest</h2>
             <h2 v-else>{{ sessionsStore.activeSessions.length }} Active Session{{ sessionsStore.activeSessions.length !== 1 ? 's' : '' }}</h2>
@@ -526,7 +529,7 @@ onUnmounted(() => {
               ⚡
             </button>
           </div>
-        </div>
+        </div> -->
         <TabsContainer @create-session="openCreateModal" />
       </div>
     </div>
@@ -638,6 +641,13 @@ onUnmounted(() => {
   padding: 0.25rem 0.375rem;
   border-radius: 4px;
   border: 1px solid var(--border-color);
+}
+
+.keyboard-hint:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.65);
+  background: var(--bg-tertiary);
+  color: var(--text-accent);
 }
 
 .btn-sm {

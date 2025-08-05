@@ -47,7 +47,7 @@ const currentTime = ref('')
 const memoryUsage = ref('--')
 
 // Version tracking
-const currentVersion = ref('0.1.1-rc.1') // Fallback version
+const currentVersion = ref('0.1.3') // Fallback version
 const latestVersion = ref('')
 const hasNewVersion = ref(false)
 const isCheckingVersion = ref(false)

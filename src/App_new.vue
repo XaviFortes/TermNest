@@ -21,55 +21,25 @@ function closeSettings() {
 }
 
 onMounted(async () => {
-  console.log('App mounting...')
-  
   // Initialize stores in order
   await settingsStore.initializeStore()
-  console.log('Settings store initialized')
-  
   await themesStore.initializeThemes()
-  console.log('Themes store initialized, current theme:', themesStore.currentThemeId)
-  
   await sessionsStore.loadSessions()
-  console.log('Sessions store initialized')
   
   // Sync theme from settings to themes store if they differ
   if (settingsStore.settings.theme && settingsStore.settings.theme !== themesStore.currentThemeId) {
-    console.log('Syncing theme from settings:', settingsStore.settings.theme, 'to themes store')
     await themesStore.setTheme(settingsStore.settings.theme)
   }
   
   // Set up event listeners
   sessionsStore.initializeEventListeners()
-  
-  console.log('App initialization complete')
 })
 </script>
 
 <template>
   <div id="app">
-    <header class="app-header">
-      <div class="header-content">
-        <h1 class="app-title">
-          <span class="title-icon">🏠</span>
-          TermNest
-        </h1>
-        <div class="header-actions">
-          <div class="theme-indicator">
-            Theme: {{ themesStore.currentTheme.metadata.name }}
-          </div>
-          <button class="btn btn-secondary" @click="testTheme" style="font-size: 0.75rem;">
-            Test
-          </button>
-          <button class="btn btn-primary" @click="openSettings">
-            Settings
-          </button>
-        </div>
-      </div>
-    </header>
-
     <main class="app-main">
-      <SessionManager />
+      <SessionManager @openSettings="openSettings" />
     </main>
 
     <footer class="app-footer">
@@ -138,55 +108,10 @@ html, body {
   --status-error: #dc3545;
 }
 
-/* Header Styles */
-.app-header {
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  padding: 0.75rem 1rem;
-  flex-shrink: 0;
-}
-
-.header-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.app-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.title-icon {
-  font-size: 1.5rem;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-
-.theme-indicator {
-  font-size: 0.875rem;
-  color: var(--text-secondary);
-  padding: 0.25rem 0.5rem;
-  background: var(--bg-tertiary);
-  border-radius: 0.25rem;
-  border: 1px solid var(--border-color);
-}
-
 /* Main Content */
 .app-main {
   flex: 1;
   overflow: hidden;
-  padding: 1rem;
 }
 
 /* Footer */

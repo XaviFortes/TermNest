@@ -445,9 +445,6 @@ onUnmounted(() => {
               </div>
               <div class="session-details">
                 {{ session.username }}@{{ session.host }}
-                <span class="status-debug" v-if="connectionStatuses[session.id] !== 'disconnected'">
-                  • {{ connectionStatuses[session.id] }}
-                </span>
               </div>
             </div>
             <div class="session-protocol">{{ session.protocol }}</div>

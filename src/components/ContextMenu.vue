@@ -26,7 +26,7 @@
       <span class="menu-icon">📤</span>
       Export
     </div>
-    <div class="context-menu-separator"></div>
+    <!-- <div class="context-menu-separator"></div>
     <div class="context-menu-item" @click="$emit('test-connected')">
       <span class="menu-icon">🟢</span>
       Test Connected
@@ -38,7 +38,7 @@
     <div class="context-menu-item" @click="$emit('test-error')">
       <span class="menu-icon">🔴</span>
       Test Error
-    </div>
+    </div> -->
     <div class="context-menu-separator"></div>
     <div class="context-menu-item danger" @click="$emit('delete')">
       <span class="menu-icon">🗑️</span>

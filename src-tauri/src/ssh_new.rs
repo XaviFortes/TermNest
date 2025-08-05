@@ -33,6 +33,13 @@ struct TerminalEvent {
     data: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct ConnectionStatusEvent {
+    session_id: String,
+    status: String,
+    message: Option<String>,
+}
+
 // Separate reader and writer handles to avoid mutex contention
 pub struct SshConnection {
     session_id: String,
@@ -43,6 +50,7 @@ pub struct SshConnection {
     reader_handle: Option<thread::JoinHandle<()>>,
     writer_handle: Option<thread::JoinHandle<()>>,
     input_handle: Option<thread::JoinHandle<()>>,
+    channel: Arc<Mutex<Channel>>,
 }
 
 impl SshConnection {
@@ -98,7 +106,8 @@ impl SshConnection {
                     Err(e) => {
                         if e.kind() == std::io::ErrorKind::WouldBlock {
                             // Non-blocking read with no data, sleep briefly
-                            thread::sleep(Duration::from_millis(10));
+                            // Use shorter sleep for better responsiveness to initial output
+                            thread::sleep(Duration::from_millis(1));
                             continue;
                         }
                         eprintln!("SSH read error: {}", e);
@@ -192,6 +201,7 @@ impl SshConnection {
             reader_handle: Some(reader_handle),
             writer_handle: Some(writer_handle),
             input_handle: Some(input_handle),
+            channel: shared_channel,
         })
     }
     
@@ -202,6 +212,12 @@ impl SshConnection {
         // let data = input.as_bytes().to_vec();
         // self.writer_tx.send(data)
             // .map_err(|e| anyhow!("Failed to send input: {}", e))?;
+        Ok(())
+    }
+
+    pub fn resize_pty(&self, cols: u32, rows: u32) -> Result<()> {
+        let mut channel = self.channel.lock().unwrap();
+        channel.request_pty_size(cols, rows, None, None)?;
         Ok(())
     }
     
@@ -319,12 +335,24 @@ impl SshManager {
         println!("SSH channel established for {}", session_id);
         
         // Create connection wrapper
-        let connection = SshConnection::new(session_id.clone(), channel, app_handle)?;
+        let connection = SshConnection::new(session_id.clone(), channel, app_handle.clone())?;
+        
+        // Give the shell a moment to initialize and send initial output
+        std::thread::sleep(std::time::Duration::from_millis(200));
         
         // Store connection
         {
             let mut connections = self.connections.lock().unwrap();
             connections.insert(session_id.clone(), connection);
+        }
+        
+        // Emit connected status
+        if let Err(e) = app_handle.emit("connection_status", &ConnectionStatusEvent {
+            session_id: session_id.clone(),
+            status: "connected".to_string(),
+            message: Some("Connection established".to_string()),
+        }) {
+            eprintln!("Failed to emit connection status: {}", e);
         }
         
         println!("SSH connection {} ready", session_id);
@@ -333,7 +361,7 @@ impl SshManager {
     
     pub fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
         let connections = self.connections.lock().unwrap();
-        
+
         if let Some(connection) = connections.get(session_id) {
             connection.send_input(input)?;
             Ok(())
@@ -341,6 +369,19 @@ impl SshManager {
             Err(anyhow!("Session not found: {}", session_id))
         }
     }
+
+    pub fn resize_terminal(&self, session_id: &str, cols: u32, rows: u32) -> Result<()> {
+        let connections = self.connections.lock().unwrap();
+
+        if let Some(connection) = connections.get(session_id) {
+            connection.resize_pty(cols, rows)?;
+            Ok(())
+        } else {
+            Err(anyhow!("Session not found: {}", session_id))
+        }
+    }
+    
+
     
     pub fn disconnect(&self, session_id: &str) -> Result<()> {
         let mut connections = self.connections.lock().unwrap();
@@ -398,6 +439,18 @@ pub async fn ssh_send_input(
     state
         .send_input(&session_id, &input)
         .map_err(|e| format!("Send input failed: {}", e))
+}
+
+#[tauri::command]
+pub async fn ssh_resize_terminal(
+    session_id: String,
+    cols: u32,
+    rows: u32,
+    state: tauri::State<'_, Arc<SshManager>>,
+) -> Result<(), String> {
+    state
+        .resize_terminal(&session_id, cols, rows)
+        .map_err(|e| format!("Resize failed: {}", e))
 }
 
 #[tauri::command]

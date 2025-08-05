@@ -853,6 +853,7 @@ pub fn run() {
             ssh_new::ssh_connect,
             ssh_new::ssh_connect_with_password,
             ssh_new::ssh_send_input,
+            ssh_new::ssh_resize_terminal,
             ssh_new::ssh_disconnect,
             ssh_new::ssh_list_sessions
         ])

@@ -1,0 +1,52 @@
+{
+  "metadata": {
+    "id": "forest-green",
+    "name": "Forest Green",
+    "description": "A natural forest-inspired theme with green tones",
+    "author": "TermNest",
+    "version": "1.0.0",
+    "category": "colorful",
+    "baseTheme": "dark"
+  },
+  "colors": {
+    "bgPrimary": "#0d1b0d",
+    "bgSecondary": "#1a2e1a",
+    "bgTertiary": "#264026",
+    "bgQuaternary": "#335533",
+    
+    "textPrimary": "#f0fff0",
+    "textSecondary": "#b8d8b8",
+    "textAccent": "#4ade80",
+    "textMuted": "#7a9d7a",
+    
+    "borderColor": "#264026",
+    "borderColorHover": "#335533",
+    "shadow": "0 2px 4px rgba(13, 27, 13, 0.4)",
+    "shadowHover": "0 4px 8px rgba(13, 27, 13, 0.6)",
+    
+    "success": "#22c55e",
+    "warning": "#f59e0b",
+    "error": "#ef4444",
+    "info": "#3b82f6",
+    
+    "terminalBg": "#0d1b0d",
+    "terminalText": "#f0fff0",
+    "terminalCursor": "#4ade80",
+    
+    "buttonPrimaryBg": "#4ade80",
+    "buttonPrimaryText": "#0d1b0d",
+    "buttonPrimaryHover": "#22c55e",
+    "buttonSecondaryBg": "#264026",
+    "buttonSecondaryText": "#f0fff0",
+    "buttonSecondaryHover": "#335533",
+    
+    "tabActiveBg": "#1a2e1a",
+    "tabInactiveBg": "#0d1b0d",
+    "tabBorderColor": "#264026",
+    
+    "statusConnected": "#22c55e",
+    "statusConnecting": "#f59e0b",
+    "statusDisconnected": "#7a9d7a",
+    "statusError": "#ef4444"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "metadata": {
+    "id": "my-custom-theme",
+    "name": "My Custom Theme",
+    "description": "A beautiful custom theme",
+    "author": "Your Name",
+    "version": "1.0.0",
+    "category": "dark",
+    "baseTheme": "dark"
+  },
+  "colors": {
+    "bgPrimary": "#1a1a1a",
+    "bgSecondary": "#2d2d2d",
+    "bgTertiary": "#404040",
+    "bgQuaternary": "#555555",
+    
+    "textPrimary": "#ffffff",
+    "textSecondary": "#b0b0b0",
+    "textAccent": "#4da6ff",
+    "textMuted": "#888888",
+    
+    "borderColor": "#404040",
+    "borderColorHover": "#555555",
+    "shadow": "0 2px 4px rgba(0, 0, 0, 0.3)",
+    "shadowHover": "0 4px 8px rgba(0, 0, 0, 0.4)",
+    
+    "success": "#4caf50",
+    "warning": "#ff9800",
+    "error": "#f44336",
+    "info": "#2196f3",
+    
+    "terminalBg": "#1a1a1a",
+    "terminalText": "#ffffff",
+    "terminalCursor": "#4da6ff",
+    
+    "buttonPrimaryBg": "#4da6ff",
+    "buttonPrimaryText": "#ffffff",
+    "buttonPrimaryHover": "#3d8bff",
+    "buttonSecondaryBg": "#404040",
+    "buttonSecondaryText": "#ffffff",
+    "buttonSecondaryHover": "#555555",
+    
+    "tabActiveBg": "#2d2d2d",
+    "tabInactiveBg": "#1a1a1a",
+    "tabBorderColor": "#404040",
+    
+    "statusConnected": "#4caf50",
+    "statusConnecting": "#ff9800",
+    "statusDisconnected": "#888888",
+    "statusError": "#f44336"
+  }
+}

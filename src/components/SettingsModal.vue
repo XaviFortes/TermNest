@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useSettingsStore } from '../stores/settings'
+import { useThemesStore } from '../stores/themes'
 
 interface Emits {
   (e: 'close'): void
@@ -8,14 +9,9 @@ interface Emits {
 
 const emit = defineEmits<Emits>()
 const settingsStore = useSettingsStore()
+const themesStore = useThemesStore()
 
 const activeTab = ref('general')
-
-const themes = [
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'system', label: 'System' }
-]
 
 const protocols = [
   { value: 'SSH', label: 'SSH' },
@@ -34,6 +30,11 @@ const localSettings = ref({ ...settingsStore.settings })
 
 function markDirty() {
   isDirty.value = true
+}
+
+async function handleThemeChange() {
+  await themesStore.setTheme(localSettings.value.theme)
+  markDirty()
 }
 
 async function saveSettings() {
@@ -108,11 +109,11 @@ function handleOverlayClick(event: MouseEvent) {
               <label class="setting-label">Theme</label>
               <select
                 v-model="localSettings.theme"
-                @change="markDirty"
+                @change="handleThemeChange"
                 class="setting-input"
               >
-                <option v-for="theme in themes" :key="theme.value" :value="theme.value">
-                  {{ theme.label }}
+                <option v-for="theme in themesStore.availableThemes" :key="theme.metadata.id" :value="theme.metadata.id">
+                  {{ theme.metadata.name }}
                 </option>
               </select>
               <div class="setting-description">

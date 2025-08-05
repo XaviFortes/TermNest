@@ -1,16 +1,30 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useSessionsStore } from './stores/sessions'
 import { useSettingsStore } from './stores/settings'
+import { useThemesStore } from './stores/themes'
 import SessionManager from './components/SessionManager.vue'
+import SettingsModal from './components/SettingsModal.vue'
 
 const sessionsStore = useSessionsStore()
 const settingsStore = useSettingsStore()
+const themesStore = useThemesStore()
+
+const showSettings = ref(false)
+
+function openSettings() {
+  showSettings.value = true
+}
+
+function closeSettings() {
+  showSettings.value = false
+}
 
 onMounted(async () => {
   // Initialize stores
   await settingsStore.initializeStore()
   await sessionsStore.loadSessions()
+  await themesStore.initializeThemes()
   
   // Set up event listeners
   sessionsStore.initializeEventListeners()
@@ -18,7 +32,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div id="app" :class="`theme-${settingsStore.settings.theme}`">
+  <div id="app">
     <header class="app-header">
       <div class="header-content">
         <h1 class="app-title">
@@ -26,7 +40,7 @@ onMounted(async () => {
           TermNest
         </h1>
         <div class="header-actions">
-          <button class="btn btn-primary" @click="() => {}">
+          <button class="btn btn-primary" @click="openSettings">
             Settings
           </button>
         </div>
@@ -45,6 +59,9 @@ onMounted(async () => {
         <span class="version-text">v0.1.0</span>
       </div>
     </footer>
+
+    <!-- Settings Modal -->
+    <SettingsModal v-if="showSettings" @close="closeSettings" />
   </div>
 </template>
 
@@ -65,60 +82,39 @@ html, body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-primary, #212529);
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Theme Variables */
-.theme-light {
+/* Default theme variables (fallbacks) */
+:root {
   --bg-primary: #ffffff;
   --bg-secondary: #f8f9fa;
   --bg-tertiary: #e9ecef;
+  --bg-quaternary: #dee2e6;
   --text-primary: #212529;
   --text-secondary: #6c757d;
   --text-accent: #0066cc;
+  --text-muted: #adb5bd;
   --border-color: #dee2e6;
+  --border-color-hover: #adb5bd;
   --shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   --shadow-hover: 0 4px 8px rgba(0, 0, 0, 0.15);
-}
-
-.theme-dark {
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #2d2d2d;
-  --bg-tertiary: #404040;
-  --text-primary: #ffffff;
-  --text-secondary: #b0b0b0;
-  --text-accent: #4da6ff;
-  --border-color: #404040;
-  --shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  --shadow-hover: 0 4px 8px rgba(0, 0, 0, 0.4);
-}
-
-.theme-system {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f8f9fa;
-  --bg-tertiary: #e9ecef;
-  --text-primary: #212529;
-  --text-secondary: #6c757d;
-  --text-accent: #0066cc;
-  --border-color: #dee2e6;
-  --shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  --shadow-hover: 0 4px 8px rgba(0, 0, 0, 0.15);
-}
-
-@media (prefers-color-scheme: dark) {
-  .theme-system {
-    --bg-primary: #1a1a1a;
-    --bg-secondary: #2d2d2d;
-    --bg-tertiary: #404040;
-    --text-primary: #ffffff;
-    --text-secondary: #b0b0b0;
-    --text-accent: #4da6ff;
-    --border-color: #404040;
-    --shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    --shadow-hover: 0 4px 8px rgba(0, 0, 0, 0.4);
-  }
+  --success: #28a745;
+  --warning: #ffc107;
+  --error: #dc3545;
+  --info: #17a2b8;
+  --button-primary-bg: #0066cc;
+  --button-primary-text: #ffffff;
+  --button-primary-hover: #0052a3;
+  --button-secondary-bg: #e9ecef;
+  --button-secondary-text: #212529;
+  --button-secondary-hover: #dee2e6;
+  --status-connected: #28a745;
+  --status-connecting: #ffc107;
+  --status-disconnected: #6c757d;
+  --status-error: #dc3545;
 }
 
 /* Header Styles */
@@ -196,23 +192,24 @@ html, body {
 }
 
 .btn-primary {
-  background: var(--text-accent);
-  color: white;
+  background: var(--button-primary-bg);
+  color: var(--button-primary-text);
 }
 
 .btn-primary:hover {
+  background: var(--button-primary-hover);
   transform: translateY(-1px);
   box-shadow: var(--shadow-hover);
 }
 
 .btn-secondary {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-text);
   border: 1px solid var(--border-color);
 }
 
 .btn-secondary:hover {
-  background: var(--bg-secondary);
+  background: var(--button-secondary-hover);
 }
 
 /* Utility Classes */

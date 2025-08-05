@@ -1,0 +1,52 @@
+{
+  "metadata": {
+    "id": "sunset-orange",
+    "name": "Sunset Orange",
+    "description": "A warm sunset-inspired theme with orange and purple tones",
+    "author": "TermNest",
+    "version": "1.0.0",
+    "category": "colorful",
+    "baseTheme": "dark"
+  },
+  "colors": {
+    "bgPrimary": "#1a0f0a",
+    "bgSecondary": "#2d1b0f",
+    "bgTertiary": "#3d2817",
+    "bgQuaternary": "#4a3220",
+    
+    "textPrimary": "#fff8f0",
+    "textSecondary": "#d4b896",
+    "textAccent": "#ff8c42",
+    "textMuted": "#a67c5a",
+    
+    "borderColor": "#3d2817",
+    "borderColorHover": "#4a3220",
+    "shadow": "0 2px 4px rgba(26, 15, 10, 0.4)",
+    "shadowHover": "0 4px 8px rgba(26, 15, 10, 0.6)",
+    
+    "success": "#7cb342",
+    "warning": "#ff9800",
+    "error": "#f44336",
+    "info": "#42a5f5",
+    
+    "terminalBg": "#1a0f0a",
+    "terminalText": "#fff8f0",
+    "terminalCursor": "#ff8c42",
+    
+    "buttonPrimaryBg": "#ff8c42",
+    "buttonPrimaryText": "#1a0f0a",
+    "buttonPrimaryHover": "#e67529",
+    "buttonSecondaryBg": "#3d2817",
+    "buttonSecondaryText": "#fff8f0",
+    "buttonSecondaryHover": "#4a3220",
+    
+    "tabActiveBg": "#2d1b0f",
+    "tabInactiveBg": "#1a0f0a",
+    "tabBorderColor": "#3d2817",
+    
+    "statusConnected": "#7cb342",
+    "statusConnecting": "#ff9800",
+    "statusDisconnected": "#a67c5a",
+    "statusError": "#f44336"
+  }
+}

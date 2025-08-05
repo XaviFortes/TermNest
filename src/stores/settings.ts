@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { Store } from '@tauri-apps/plugin-store'
 
 export interface AppSettings {
-  theme: 'light' | 'dark' | 'system'
+  theme: string // Changed to allow any theme ID
   defaultProtocol: 'SSH' | 'SFTP'
   autoConnect: boolean
   savePasswords: boolean
@@ -13,7 +13,7 @@ export interface AppSettings {
 }
 
 const defaultSettings: AppSettings = {
-  theme: 'system',
+  theme: 'system', // Changed to string
   defaultProtocol: 'SSH',
   autoConnect: false,
   savePasswords: false,

@@ -50,6 +50,7 @@ pub struct SshConnection {
     reader_handle: Option<thread::JoinHandle<()>>,
     writer_handle: Option<thread::JoinHandle<()>>,
     input_handle: Option<thread::JoinHandle<()>>,
+    channel: Arc<Mutex<Channel>>,
 }
 
 impl SshConnection {
@@ -200,6 +201,7 @@ impl SshConnection {
             reader_handle: Some(reader_handle),
             writer_handle: Some(writer_handle),
             input_handle: Some(input_handle),
+            channel: shared_channel,
         })
     }
     
@@ -210,6 +212,12 @@ impl SshConnection {
         // let data = input.as_bytes().to_vec();
         // self.writer_tx.send(data)
             // .map_err(|e| anyhow!("Failed to send input: {}", e))?;
+        Ok(())
+    }
+
+    pub fn resize_pty(&self, cols: u32, rows: u32) -> Result<()> {
+        let mut channel = self.channel.lock().unwrap();
+        channel.request_pty_size(cols, rows, None, None)?;
         Ok(())
     }
     
@@ -353,9 +361,20 @@ impl SshManager {
     
     pub fn send_input(&self, session_id: &str, input: &str) -> Result<()> {
         let connections = self.connections.lock().unwrap();
-        
+
         if let Some(connection) = connections.get(session_id) {
             connection.send_input(input)?;
+            Ok(())
+        } else {
+            Err(anyhow!("Session not found: {}", session_id))
+        }
+    }
+
+    pub fn resize_terminal(&self, session_id: &str, cols: u32, rows: u32) -> Result<()> {
+        let connections = self.connections.lock().unwrap();
+
+        if let Some(connection) = connections.get(session_id) {
+            connection.resize_pty(cols, rows)?;
             Ok(())
         } else {
             Err(anyhow!("Session not found: {}", session_id))
@@ -420,6 +439,18 @@ pub async fn ssh_send_input(
     state
         .send_input(&session_id, &input)
         .map_err(|e| format!("Send input failed: {}", e))
+}
+
+#[tauri::command]
+pub async fn ssh_resize_terminal(
+    session_id: String,
+    cols: u32,
+    rows: u32,
+    state: tauri::State<'_, Arc<SshManager>>,
+) -> Result<(), String> {
+    state
+        .resize_terminal(&session_id, cols, rows)
+        .map_err(|e| format!("Resize failed: {}", e))
 }
 
 #[tauri::command]

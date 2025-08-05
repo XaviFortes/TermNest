@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import { useSessionsStore } from './stores/sessions'
 import { useSettingsStore } from './stores/settings'
 import SessionManager from './components/SessionManager.vue'
@@ -10,18 +9,6 @@ import StatusBar from './components/StatusBar.vue'
 const sessionsStore = useSessionsStore()
 const settingsStore = useSettingsStore()
 const showSettingsModal = ref(false)
-
-async function testTauriConnection() {
-  try {
-    console.log('Testing Tauri connection...')
-    const result = await invoke('greet', { name: 'Test' })
-    console.log('Tauri connection test result:', result)
-    alert('Tauri connection working: ' + result)
-  } catch (error) {
-    console.error('Tauri connection test failed:', error)
-    alert('Tauri connection failed: ' + error)
-  }
-}
 
 onMounted(async () => {
   console.log('App: Mounting application...')

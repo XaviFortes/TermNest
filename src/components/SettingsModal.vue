@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import { useThemesStore } from '../stores/themes'
 
@@ -28,19 +28,54 @@ const terminalThemes = [
 const isDirty = ref(false)
 const localSettings = ref({ ...settingsStore.settings })
 
+// Sync localSettings with current theme when modal opens
+onMounted(() => {
+  console.log('SettingsModal mounted')
+  console.log('Current theme ID:', themesStore.currentThemeId)
+  console.log('Settings store theme:', settingsStore.settings.theme)
+  console.log('Available themes:', themesStore.availableThemes.map(t => `${t.metadata.id}: ${t.metadata.name}`))
+  
+  // Ensure localSettings reflects the current theme
+  localSettings.value = { 
+    ...settingsStore.settings,
+    theme: themesStore.currentThemeId || settingsStore.settings.theme
+  }
+  
+  console.log('LocalSettings theme set to:', localSettings.value.theme)
+  
+  // Debug available themes
+  if (themesStore.debugThemes) {
+    themesStore.debugThemes()
+  }
+})
+
 function markDirty() {
   isDirty.value = true
 }
 
 async function handleThemeChange() {
-  await themesStore.setTheme(localSettings.value.theme)
-  markDirty()
+  console.log('Theme change triggered, new value:', localSettings.value.theme)
+  try {
+    await themesStore.setTheme(localSettings.value.theme)
+    // Also update the settings store immediately
+    await settingsStore.updateSetting('theme', localSettings.value.theme)
+    console.log('Theme applied successfully')
+  } catch (error) {
+    console.error('Failed to apply theme:', error)
+  }
 }
 
 async function saveSettings() {
   try {
+    // Apply the theme first if it changed
+    if (localSettings.value.theme !== settingsStore.settings.theme) {
+      console.log('Theme changed during save, applying:', localSettings.value.theme)
+      await themesStore.setTheme(localSettings.value.theme)
+    }
+    
     await settingsStore.updateSettings(localSettings.value)
     isDirty.value = false
+    console.log('Settings saved successfully')
   } catch (error) {
     console.error('Failed to save settings:', error)
   }
@@ -117,7 +152,7 @@ function handleOverlayClick(event: MouseEvent) {
                 </option>
               </select>
               <div class="setting-description">
-                Choose the application theme. System will follow your OS preference.
+                Choose the application theme. Current: {{ themesStore.currentTheme.metadata.name }}
               </div>
             </div>
 

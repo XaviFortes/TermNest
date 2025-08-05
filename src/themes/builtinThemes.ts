@@ -248,10 +248,64 @@ export const draculaTheme: Theme = {
   }
 }
 
+export const solarizedDarkTheme: Theme = {
+  metadata: {
+    id: 'solarized-dark',
+    name: 'Solarized Dark',
+    description: 'The classic Solarized dark theme',
+    author: 'TermNest',
+    version: '1.0.0',
+    category: 'dark',
+    baseTheme: 'dark'
+  },
+  colors: {
+    bgPrimary: '#002b36',
+    bgSecondary: '#073642',
+    bgTertiary: '#586e75',
+    bgQuaternary: '#657b83',
+    
+    textPrimary: '#839496',
+    textSecondary: '#93a1a1',
+    textAccent: '#268bd2',
+    textMuted: '#586e75',
+    
+    borderColor: '#073642',
+    borderColorHover: '#586e75',
+    shadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+    shadowHover: '0 4px 8px rgba(0, 0, 0, 0.4)',
+    
+    success: '#859900',
+    warning: '#b58900',
+    error: '#dc322f',
+    info: '#268bd2',
+    
+    terminalBg: '#002b36',
+    terminalText: '#839496',
+    terminalCursor: '#268bd2',
+    
+    buttonPrimaryBg: '#268bd2',
+    buttonPrimaryText: '#002b36',
+    buttonPrimaryHover: '#2176c7',
+    buttonSecondaryBg: '#073642',
+    buttonSecondaryText: '#839496',
+    buttonSecondaryHover: '#586e75',
+    
+    tabActiveBg: '#073642',
+    tabInactiveBg: '#002b36',
+    tabBorderColor: '#586e75',
+    
+    statusConnected: '#859900',
+    statusConnecting: '#b58900',
+    statusDisconnected: '#586e75',
+    statusError: '#dc322f'
+  }
+}
+
 export const builtInThemes: Theme[] = [
   lightTheme,
   darkTheme,
   systemTheme,
   monokaiTheme,
-  draculaTheme
+  draculaTheme,
+  solarizedDarkTheme
 ]

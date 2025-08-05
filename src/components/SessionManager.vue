@@ -814,17 +814,17 @@ onUnmounted(() => {
 }
 
 .session-status .status-dot.connected {
-  background: #28a745 !important;
+  background: var(--status-connected) !important;
   box-shadow: 0 0 4px rgba(40, 167, 69, 0.5); /* Reduced from 6px */
 }
 
 .session-status .status-dot.connecting {
-  background: #ffc107 !important;
+  background: var(--status-connecting) !important;
   animation: pulse 1.5s infinite;
 }
 
 .session-status .status-dot.error {
-  background: #dc3545 !important;
+  background: var(--status-error) !important;
 }
 
 @keyframes pulse {
@@ -940,17 +940,17 @@ onUnmounted(() => {
 }
 
 .collapsed-session-item .status-dot.connected {
-  background: #28a745 !important;
+  background: var(--status-connected) !important;
   box-shadow: 0 0 4px rgba(40, 167, 69, 0.5);
 }
 
 .collapsed-session-item .status-dot.connecting {
-  background: #ffc107 !important;
+  background: var(--status-connecting) !important;
   animation: pulse 1.5s infinite;
 }
 
 .collapsed-session-item .status-dot.error {
-  background: #dc3545 !important;
+  background: var(--status-error) !important;
 }
 
 .collapsed-add-btn {
@@ -1010,7 +1010,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 0.5rem;
   background: rgba(220, 53, 69, 0.1);
-  color: #dc3545;
+  color: var(--error);
   padding: 0.75rem 1rem;
   margin: 1rem;
   border-radius: 8px;
@@ -1078,7 +1078,7 @@ onUnmounted(() => {
 }
 
 .debug-btn.connected {
-  background: #28a745;
+  background: var(--success);
   color: white;
 }
 
@@ -1087,7 +1087,7 @@ onUnmounted(() => {
 }
 
 .debug-btn.disconnected {
-  background: #dc3545;
+  background: var(--error);
   color: white;
 }
 
@@ -1097,17 +1097,17 @@ onUnmounted(() => {
 
 .debug-status.connected {
   background: rgba(40, 167, 69, 0.1);
-  color: #28a745;
+  color: var(--success);
 }
 
 .debug-status.connecting {
   background: rgba(255, 193, 7, 0.1);
-  color: #ffc107;
+  color: var(--warning);
 }
 
 .debug-status.error {
   background: rgba(220, 53, 69, 0.1);
-  color: #dc3545;
+  color: var(--error);
 }
 
 .debug-status.disconnected {
@@ -1169,7 +1169,7 @@ onUnmounted(() => {
 /* Custom Scrollbars for Session Manager */
 :deep(*) {
   scrollbar-width: thin;
-  scrollbar-color: #555 #2d2d2d;
+  scrollbar-color: var(--text-muted) var(--bg-secondary);
 }
 
 :deep(*::-webkit-scrollbar) {
@@ -1178,26 +1178,26 @@ onUnmounted(() => {
 }
 
 :deep(*::-webkit-scrollbar-track) {
-  background: #2d2d2d;
+  background: var(--bg-secondary);
   border-radius: 4px;
 }
 
 :deep(*::-webkit-scrollbar-thumb) {
-  background: #555;
+  background: var(--text-muted);
   border-radius: 4px;
-  border: 1px solid #2d2d2d;
+  border: 1px solid var(--bg-secondary);
 }
 
 :deep(*::-webkit-scrollbar-thumb:hover) {
-  background: #666;
+  background: var(--border-color-hover);
 }
 
 :deep(*::-webkit-scrollbar-thumb:active) {
-  background: #777;
+  background: var(--text-secondary);
 }
 
 :deep(*::-webkit-scrollbar-corner) {
-  background: #2d2d2d;
+  background: var(--bg-secondary);
 }
 
 /* Sessions list specific scrollbar */

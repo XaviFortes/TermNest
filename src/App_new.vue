@@ -21,13 +21,28 @@ function closeSettings() {
 }
 
 onMounted(async () => {
-  // Initialize stores
+  console.log('App mounting...')
+  
+  // Initialize stores in order
   await settingsStore.initializeStore()
-  await sessionsStore.loadSessions()
+  console.log('Settings store initialized')
+  
   await themesStore.initializeThemes()
+  console.log('Themes store initialized, current theme:', themesStore.currentThemeId)
+  
+  await sessionsStore.loadSessions()
+  console.log('Sessions store initialized')
+  
+  // Sync theme from settings to themes store if they differ
+  if (settingsStore.settings.theme && settingsStore.settings.theme !== themesStore.currentThemeId) {
+    console.log('Syncing theme from settings:', settingsStore.settings.theme, 'to themes store')
+    await themesStore.setTheme(settingsStore.settings.theme)
+  }
   
   // Set up event listeners
   sessionsStore.initializeEventListeners()
+  
+  console.log('App initialization complete')
 })
 </script>
 
@@ -40,6 +55,12 @@ onMounted(async () => {
           TermNest
         </h1>
         <div class="header-actions">
+          <div class="theme-indicator">
+            Theme: {{ themesStore.currentTheme.metadata.name }}
+          </div>
+          <button class="btn btn-secondary" @click="testTheme" style="font-size: 0.75rem;">
+            Test
+          </button>
           <button class="btn btn-primary" @click="openSettings">
             Settings
           </button>
@@ -148,7 +169,17 @@ html, body {
 
 .header-actions {
   display: flex;
-  gap: 0.5rem;
+  align-items: center;
+  gap: 1rem;
+}
+
+.theme-indicator {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  padding: 0.25rem 0.5rem;
+  background: var(--bg-tertiary);
+  border-radius: 0.25rem;
+  border: 1px solid var(--border-color);
 }
 
 /* Main Content */

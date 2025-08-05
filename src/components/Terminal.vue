@@ -280,10 +280,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useSessionsStore } from '../stores/sessions'
+import { useThemesStore } from '../stores/themes'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import PasswordDialog from './PasswordDialog.vue'
@@ -305,6 +306,7 @@ interface FileItem {
 
 const props = defineProps<Props>()
 const sessionsStore = useSessionsStore()
+const themesStore = useThemesStore()
 
 // Terminal state
 const terminalContainer = ref<HTMLElement>()
@@ -380,6 +382,11 @@ onMounted(async () => {
   await setupEventListeners()  // Set up listeners BEFORE connecting
   await initializeTerminal()
   focusTerminal()
+})
+
+// Watch for theme changes and update terminal theme
+watch(() => themesStore.currentThemeId, () => {
+  updateTerminalTheme()
 })
 
 onUnmounted(() => {
@@ -573,33 +580,49 @@ function appendOutput(text: string) {
   }
 }
 
+function getTerminalTheme() {
+  // Get CSS custom properties from the document root
+  const rootStyle = getComputedStyle(document.documentElement)
+  
+  return {
+    background: rootStyle.getPropertyValue('--terminal-bg').trim() || '#1a1a1a',
+    foreground: rootStyle.getPropertyValue('--terminal-text').trim() || '#ffffff',
+    cursor: rootStyle.getPropertyValue('--terminal-cursor').trim() || '#ffffff',
+    selectionBackground: rootStyle.getPropertyValue('--bg-tertiary').trim() || '#3e3e3e',
+    // Use theme colors or fallback to original values
+    black: '#000000',
+    red: rootStyle.getPropertyValue('--error').trim() || '#ff5555',
+    green: rootStyle.getPropertyValue('--success').trim() || '#50fa7b',
+    yellow: rootStyle.getPropertyValue('--warning').trim() || '#f1fa8c',
+    blue: rootStyle.getPropertyValue('--info').trim() || '#bd93f9',
+    magenta: rootStyle.getPropertyValue('--text-accent').trim() || '#ff79c6',
+    cyan: '#8be9fd',
+    white: rootStyle.getPropertyValue('--text-primary').trim() || '#ffffff',
+    brightBlack: rootStyle.getPropertyValue('--text-muted').trim() || '#44475a',
+    brightRed: rootStyle.getPropertyValue('--error').trim() || '#ff5555',
+    brightGreen: rootStyle.getPropertyValue('--success').trim() || '#50fa7b',
+    brightYellow: rootStyle.getPropertyValue('--warning').trim() || '#f1fa8c',
+    brightBlue: rootStyle.getPropertyValue('--info').trim() || '#bd93f9',
+    brightMagenta: rootStyle.getPropertyValue('--text-accent').trim() || '#ff79c6',
+    brightCyan: '#8be9fd',
+    brightWhite: rootStyle.getPropertyValue('--text-primary').trim() || '#ffffff'
+  }
+}
+
+function updateTerminalTheme() {
+  if (terminal) {
+    const newTheme = getTerminalTheme()
+    terminal.options.theme = newTheme
+    console.log('Terminal theme updated:', newTheme)
+  }
+}
+
 function setupTerminal() {
   if (!terminalContainer.value) return
   
-  // Create terminal instance
+  // Create terminal instance with dynamic theme
   terminal = new Terminal({
-    theme: {
-      background: '#1a1a1a',
-      foreground: '#ffffff',
-      cursor: '#ffffff',
-      selectionBackground: '#3e3e3e',
-      black: '#000000',
-      red: '#ff5555',
-      green: '#50fa7b',
-      yellow: '#f1fa8c',
-      blue: '#bd93f9',
-      magenta: '#ff79c6',
-      cyan: '#8be9fd',
-      white: '#ffffff',
-      brightBlack: '#44475a',
-      brightRed: '#ff5555',
-      brightGreen: '#50fa7b',
-      brightYellow: '#f1fa8c',
-      brightBlue: '#bd93f9',
-      brightMagenta: '#ff79c6',
-      brightCyan: '#8be9fd',
-      brightWhite: '#ffffff'
-    },
+    theme: getTerminalTheme(),
     fontSize: 12, /* Reduced from 14 */
     fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
     cursorBlink: true,
@@ -1096,8 +1119,8 @@ function disconnect() {
   height: calc(100vh - 40px); /* Account for window titlebar and borders */
   display: flex;
   flex-direction: column;
-  background: #1e1e1e;
-  color: #ffffff;
+  background: var(--terminal-bg);
+  color: var(--terminal-text);
   font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
   overflow: hidden;
 }
@@ -1580,9 +1603,9 @@ function disconnect() {
 }
 
 .breadcrumb-btn {
-  background: #1e1e1e;
-  border: 1px solid #555;
-  color: #fff;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
   padding: 0.2rem 0.4rem;
   border-radius: 3px;
   font-size: 0.7rem;
@@ -1611,9 +1634,9 @@ function disconnect() {
 
 .path-input {
   flex: 1;
-  background: #1e1e1e;
-  border: 1px solid #555;
-  color: #fff;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
   padding: 0.25rem 0.5rem;
   border-radius: 3px;
   font-size: 0.75rem;
@@ -1683,16 +1706,16 @@ function disconnect() {
 }
 
 .file-list-body::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: var(--bg-primary);
 }
 
 .file-list-body::-webkit-scrollbar-thumb {
-  background: #555;
+  background: var(--text-muted);
   border-radius: 4px;
 }
 
 .file-list-body::-webkit-scrollbar-thumb:hover {
-  background: #777;
+  background: var(--text-secondary);
 }
 
 .file-item {
@@ -1859,9 +1882,9 @@ function disconnect() {
 }
 
 .form-control {
-  background: #1e1e1e;
-  border: 1px solid #555;
-  color: #fff;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
   padding: 0.375rem 0.75rem;
   border-radius: 3px;
 }

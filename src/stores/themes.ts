@@ -20,6 +20,7 @@ export const useThemesStore = defineStore('themes', () => {
       
       // Set initial theme based on saved preference or system
       const savedThemeId = getSavedThemeId()
+      console.log('Initializing themes with saved theme:', savedThemeId)
       await setTheme(savedThemeId || 'system')
       
       // Watch for system theme changes if using system theme
@@ -35,12 +36,15 @@ export const useThemesStore = defineStore('themes', () => {
   }
 
   async function setTheme(themeId: string) {
+    console.log('Setting theme to:', themeId)
     const theme = availableThemes.value.find(t => t.metadata.id === themeId)
     
     if (!theme) {
-      console.warn(`Theme not found: ${themeId}`)
+      console.warn(`Theme not found: ${themeId}`, 'Available themes:', availableThemes.value.map(t => t.metadata.id))
       return
     }
+
+    console.log('Found theme:', theme.metadata.name, 'Colors:', theme.colors)
 
     // Handle system theme
     if (themeId === 'system') {
@@ -49,8 +53,10 @@ export const useThemesStore = defineStore('themes', () => {
         ...systemTheme,
         colors: prefersDark ? darkTheme.colors : lightTheme.colors
       }
+      console.log('System theme applied, using:', prefersDark ? 'dark' : 'light')
     } else {
       currentTheme.value = theme
+      console.log('Custom theme applied:', theme.metadata.name)
     }
 
     // Apply theme to DOM
@@ -58,21 +64,34 @@ export const useThemesStore = defineStore('themes', () => {
     
     // Save theme preference
     saveThemeId(themeId)
+    
+    console.log('Theme setting completed for:', themeId)
   }
 
   function applyThemeToDOM(colors: ThemeColors) {
+    console.log('Applying theme to DOM with colors:', colors)
     const root = document.documentElement
     
     // Apply CSS custom properties
     Object.entries(colors).forEach(([key, value]) => {
       const cssVar = camelToKebab(key)
       root.style.setProperty(`--${cssVar}`, value as string)
+      console.log(`Set --${cssVar}: ${value}`)
     })
     
-    // Apply theme class
+    // Apply theme class for any CSS that might still need it
     const body = document.body
     body.className = body.className.replace(/theme-\w+/g, '')
     body.classList.add(`theme-${currentTheme.value.metadata.baseTheme || 'light'}`)
+    
+    console.log(`Applied theme: ${currentTheme.value.metadata.name}`)
+    console.log(`Theme class: theme-${currentTheme.value.metadata.baseTheme || 'light'}`)
+    
+    // Verify some key variables were set
+    const computedStyle = getComputedStyle(root)
+    console.log('Verification - bg-primary:', computedStyle.getPropertyValue('--bg-primary'))
+    console.log('Verification - text-primary:', computedStyle.getPropertyValue('--text-primary'))
+    console.log('Verification - text-accent:', computedStyle.getPropertyValue('--text-accent'))
   }
 
   function watchSystemTheme() {
@@ -128,6 +147,13 @@ export const useThemesStore = defineStore('themes', () => {
     // Actions
     initializeThemes,
     setTheme,
-    applyThemeToDOM
+    applyThemeToDOM,
+    
+    // Debug function
+    debugThemes: () => {
+      console.log('Available themes:', availableThemes.value.map(t => t.metadata))
+      console.log('Current theme:', currentTheme.value.metadata)
+      console.log('Current CSS vars:', [...document.documentElement.style])
+    }
   }
 })

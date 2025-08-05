@@ -312,6 +312,28 @@ const connectionStatus = ref<'connecting' | 'connected' | 'disconnected'>('conne
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 
+async function fitTerminal() {
+  if (fitAddon && terminal) {
+    try {
+      fitAddon.fit()
+      const cols = terminal.cols
+      const rows = terminal.rows
+      try {
+        await invoke('ssh_resize_terminal', {
+          sessionId: props.sessionId,
+          cols,
+          rows
+        })
+        console.log(`Terminal resized to ${cols}x${rows}`)
+      } catch (error) {
+        console.warn('Failed to resize backend terminal:', error)
+      }
+    } catch (error) {
+      console.warn('Terminal resize failed:', error)
+    }
+  }
+}
+
 // Connection log state
 const connectionSteps = ref([
   'Establishing TCP connection',
@@ -491,7 +513,9 @@ async function initializeTerminal() {
       status: 'connected',
       message: 'SSH connection established'
     })
-    
+
+    await fitTerminal()
+
     if (props.protocol === 'SSH') {
       await loadRemoteFiles()
     }
@@ -595,9 +619,7 @@ function setupTerminal() {
   
   // Fit terminal to container size
   setTimeout(() => {
-    if (fitAddon) {
-      fitAddon.fit()
-    }
+    fitTerminal()
   }, 0)
   
   // Handle user input
@@ -620,48 +642,19 @@ function setupTerminal() {
       clearTimeout(resizeTimeout)
     }
     resizeTimeout = window.setTimeout(async () => {
-      if (fitAddon && terminal) {
-        try {
-          fitAddon.fit()
-          console.log(`Terminal fitted to container: ${terminal.cols}x${terminal.rows}`)
-        } catch (error) {
-          console.warn('Terminal resize failed:', error)
-        }
-      }
+      fitTerminal()
     }, 100) // Increased debounce time for better performance
   })
   
   resizeObserver.observe(terminalContainer.value)
   
   // Also handle window resize
-  const handleWindowResize = async () => {
+  const handleWindowResize = () => {
     if (resizeTimeout) {
       clearTimeout(resizeTimeout)
     }
-    resizeTimeout = window.setTimeout(async () => {
-      if (fitAddon && terminal) {
-        try {
-          fitAddon.fit()
-          
-          // Get terminal dimensions and notify backend
-          const cols = terminal.cols
-          const rows = terminal.rows
-          
-          // Send resize to backend
-          try {
-            await invoke('ssh_resize_terminal', {
-              sessionId: props.sessionId,
-              cols: cols,
-              rows: rows
-            })
-            console.log(`Terminal window resized to ${cols}x${rows}`)
-          } catch (error) {
-            console.warn('Failed to resize backend terminal on window resize:', error)
-          }
-        } catch (error) {
-          console.warn('Terminal window resize failed:', error)
-        }
-      }
+    resizeTimeout = window.setTimeout(() => {
+      fitTerminal()
     }, 150) // Slightly longer delay for window resize
   }
   
@@ -695,9 +688,7 @@ function toggleSftp() {
   
   // Resize terminal after SFTP panel toggle
   setTimeout(() => {
-    if (fitAddon && terminal) {
-      fitAddon.fit()
-    }
+    fitTerminal()
   }, 300) // Wait for animation to complete
 }
 
@@ -707,9 +698,7 @@ function closeSftp() {
   
   // Resize terminal after closing SFTP
   setTimeout(() => {
-    if (fitAddon && terminal) {
-      fitAddon.fit()
-    }
+    fitTerminal()
   }, 100)
 }
 
@@ -1104,7 +1093,7 @@ function disconnect() {
 
 <style scoped>
 .terminal-container {
-  height: calc(100vh - 40px); /* Account for window titlebar and borders */
+  height: 100vh;
   display: flex;
   flex-direction: column;
   background: #1e1e1e;
@@ -1128,7 +1117,7 @@ function disconnect() {
   display: flex;
   overflow: hidden;
   min-height: 0;
-  height: calc(100vh - 120px); /* Account for titlebar + header + some padding */
+  /* Let flex layout determine remaining height to avoid clipping */
 }
 
 .terminal-wrapper {
@@ -1309,8 +1298,7 @@ function disconnect() {
   overflow: hidden; /* Let xterm.js handle scrolling */
   cursor: text;
   min-height: 0; /* Important for flex child */
-  height: 100%; /* Ensure full height usage */
-  max-height: calc(100vh - 160px); /* Reserve space for header and controls, prevent bottom overflow */
+  /* Allow terminal to fill available vertical space */
 }
 
 .terminal-simulation {

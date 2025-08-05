@@ -55,28 +55,8 @@ function closeSettings() {
 
 <template>
   <div id="app" :class="`theme-${settingsStore.settings.theme}`">
-    <header class="app-header">
-      <div class="header-content">
-        <h1 class="app-title">
-          <span class="title-icon">🏠</span>
-          TermNest
-        </h1>
-        <div class="header-actions">
-          <button class="btn btn-secondary" @click="testTauriConnection">
-            Test Connection
-          </button>
-          <button class="btn btn-primary" @click="openSettings">
-            Settings
-          </button>
-          <div class="keyboard-hint">
-            <span>⚡ Ctrl+Shift+P for Quick Actions</span>
-          </div>
-        </div>
-      </div>
-    </header>
-
     <main class="app-main">
-      <SessionManager />
+      <SessionManager @openSettings="openSettings" />
     </main>
 
     <StatusBar />
@@ -162,57 +142,6 @@ html, body {
   }
 }
 
-/* Header Styles */
-.app-header {
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  padding: 0.75rem 1rem;
-  flex-shrink: 0;
-}
-
-.header-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.app-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.title-icon {
-  font-size: 1.5rem;
-}
-
-.header-actions {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.keyboard-hint {
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  background: var(--bg-primary);
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  border: 1px solid var(--border-color);
-  margin-left: 0.5rem;
-}
-
-.keyboard-hint span {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
 /* Main Content */
 .app-main {
   flex: 1;
@@ -222,17 +151,17 @@ html, body {
 
 /* Button Styles */
 .btn {
-  padding: 0.5rem 1rem;
+  padding: 0.375rem 0.75rem; /* Reduced from 0.5rem 1rem */
   border: none;
-  border-radius: 0.375rem;
-  font-size: 0.875rem;
+  border-radius: 0.25rem; /* Reduced from 0.375rem */
+  font-size: 0.8125rem; /* Reduced from 0.875rem */
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem; /* Reduced from 0.5rem */
 }
 
 .btn-primary {

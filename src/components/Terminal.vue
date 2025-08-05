@@ -576,7 +576,7 @@ function setupTerminal() {
       brightCyan: '#8be9fd',
       brightWhite: '#ffffff'
     },
-    fontSize: 14,
+    fontSize: 12, /* Reduced from 14 */
     fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
     cursorBlink: true,
     convertEol: true,
@@ -1117,7 +1117,7 @@ function disconnect() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem; /* Reduced from 0.75rem 1rem */
   background: #2d2d2d;
   border-bottom: 1px solid #404040;
   flex-shrink: 0;
@@ -1382,7 +1382,7 @@ function disconnect() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem; /* Reduced from 0.75rem 1rem */
   background: #404040;
   border-bottom: 1px solid #555;
   flex-shrink: 0;
@@ -1391,23 +1391,23 @@ function disconnect() {
 .sftp-title {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.15rem; /* Reduced from 0.2rem */
 }
 
 .sftp-title h3 {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: 0.8125rem; /* Reduced from 0.875rem */
   font-weight: 600;
 }
 
 .file-count {
-  font-size: 0.7rem;
+  font-size: 0.625rem; /* Reduced from 0.7rem */
   color: #888;
 }
 
 .sftp-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.375rem; /* Reduced from 0.5rem */
 }
 
 .sftp-content {
@@ -1447,7 +1447,7 @@ function disconnect() {
 .file-item.compact {
   display: block;
   grid-template-columns: none;
-  padding: 0.4rem 0.6rem;
+  padding: 0.3rem 0.5rem; /* Reduced from 0.4rem 0.6rem */
 }
 
 .file-item.compact:hover {
@@ -1462,11 +1462,11 @@ function disconnect() {
 .file-compact {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem; /* Reduced from 0.5rem */
 }
 
 .file-compact .file-icon {
-  width: 16px;
+  width: 14px; /* Reduced from 16px */
   text-align: center;
   flex-shrink: 0;
 }
@@ -1500,10 +1500,10 @@ function disconnect() {
 .context-menu-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 1rem;
+  gap: 0.5rem; /* Reduced from 0.75rem */
+  padding: 0.375rem 0.75rem; /* Reduced from 0.5rem 1rem */
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.75rem; /* Reduced from 0.8rem */
   transition: background-color 0.2s;
 }
 
@@ -1517,7 +1517,7 @@ function disconnect() {
 
 .context-menu-item.info-item {
   cursor: default;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem; /* Reduced from 0.75rem 1rem */
 }
 
 .context-menu-item.info-item:hover {
@@ -1525,7 +1525,7 @@ function disconnect() {
 }
 
 .menu-icon {
-  width: 16px;
+  width: 14px; /* Reduced from 16px */
   text-align: center;
   flex-shrink: 0;
 }
@@ -1533,20 +1533,20 @@ function disconnect() {
 .context-menu-separator {
   height: 1px;
   background: #555;
-  margin: 0.25rem 0;
+  margin: 0.1875rem 0; /* Reduced from 0.25rem 0 */
 }
 
 .file-details {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.7rem;
+  gap: 0.25rem; /* Reduced from 0.3rem */
+  font-size: 0.625rem; /* Reduced from 0.7rem */
 }
 
 .detail-row {
   display: flex;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem; /* Reduced from 1rem */
 }
 
 .detail-label {
@@ -1658,7 +1658,7 @@ function disconnect() {
 }
 
 .empty-text {
-  font-size: 0.875rem;
+  font-size: 0.8125rem; /* Reduced from 0.875rem */
 }
 
 .file-list {
@@ -1671,11 +1671,11 @@ function disconnect() {
 .file-list-header {
   display: grid;
   grid-template-columns: 1fr 80px 100px 80px;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  gap: 0.375rem; /* Reduced from 0.5rem */
+  padding: 0.375rem 0.5rem; /* Reduced from 0.5rem 0.75rem */
   background: #404040;
   border-bottom: 1px solid #555;
-  font-size: 0.7rem;
+  font-size: 0.625rem; /* Reduced from 0.7rem */
   font-weight: 600;
   color: #ccc;
   flex-shrink: 0;
@@ -1709,11 +1709,11 @@ function disconnect() {
 .file-item {
   display: grid;
   grid-template-columns: 1fr 80px 100px 80px;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  gap: 0.375rem; /* Reduced from 0.5rem */
+  padding: 0.375rem 0.5rem; /* Reduced from 0.5rem 0.75rem */
   border-bottom: 1px solid #404040;
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.6875rem; /* Reduced from 0.75rem */
   align-items: center;
   transition: background-color 0.2s;
 }

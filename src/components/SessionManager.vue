@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useSessionsStore, type Session } from '../stores/sessions'
+import { invoke } from '@tauri-apps/api/core'
 import CreateSessionModal from './CreateSessionModal.vue'
 import TabsContainer from './TabsContainer.vue'
 import QuickActionsMenu from './QuickActionsMenu.vue'
 import ContextMenu from './ContextMenu.vue'
+
+// Props
+const emit = defineEmits<{
+  openSettings: []
+}>()
 
 const sessionsStore = useSessionsStore()
 
@@ -80,6 +86,22 @@ function closeCreateModal() {
   showCreateModal.value = false
 }
 
+async function testTauriConnection() {
+  try {
+    console.log('Testing Tauri connection...')
+    const result = await invoke('greet', { name: 'Test' })
+    console.log('Tauri connection test result:', result)
+    alert('Tauri connection working: ' + result)
+  } catch (error) {
+    console.error('Tauri connection test failed:', error)
+    alert('Tauri connection failed: ' + error)
+  }
+}
+
+function openSettings() {
+  emit('openSettings')
+}
+
 function openEditModal(session: Session) {
   console.log('SessionManager: Opening edit modal for session:', session)
   editingSession.value = session
@@ -120,8 +142,38 @@ function openSession(session: Session) {
 function showSessionContextMenu(event: MouseEvent, session: Session) {
   event.preventDefault()
   contextMenuSession.value = session
-  contextMenuPosition.value = { x: event.clientX, y: event.clientY }
+  
+  // Calculate position to prevent menu from going off-screen
+  // More accurate context menu dimensions (based on actual ContextMenu component)
+  const menuWidth = 180 // More accurate width
+  const menuHeight = 350 // Height including all menu items and separators
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  
+  let x = event.clientX
+  let y = event.clientY
+  
+  // Adjust x position if menu would go off right edge
+  if (x + menuWidth > viewportWidth) {
+    x = Math.max(5, viewportWidth - menuWidth - 10)
+  }
+  
+  // Adjust y position if menu would go off bottom edge
+  if (y + menuHeight > viewportHeight) {
+    y = Math.max(5, viewportHeight - menuHeight - 10)
+  }
+  
+  // Ensure menu doesn't go off top or left edges
+  x = Math.max(5, x)
+  y = Math.max(5, y)
+  
+  contextMenuPosition.value = { x, y }
   showContextMenu.value = true
+  
+  // Add click outside to close
+  setTimeout(() => {
+    document.addEventListener('click', hideContextMenu, { once: true })
+  })
 }
 
 function hideContextMenu() {
@@ -311,21 +363,44 @@ onUnmounted(() => {
 
 <template>
   <div class="session-manager" @click="handleGlobalClick">
-    <!-- Sidebar for Sessions -->
-    <div class="sidebar" :class="{ 'collapsed': sidebarCollapsed }">
-      <div class="sidebar-header">
-        <div class="sidebar-title" v-if="!sidebarCollapsed">
-          <h2>Sessions</h2>
-          <div class="session-count">
-            {{ sessionsStore.sessions.length }}
+    <!-- Unified Header -->
+    <div class="unified-header">
+      <div class="header-left">
+        <h1 class="app-title">
+          <span class="title-icon">🏠</span>
+          TermNest
+        </h1>
+        <div class="session-info">
+          <button class="sidebar-toggle" @click="toggleSidebar" :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'">
+            <span v-if="sidebarCollapsed">▶</span>
+            <span v-else>◀</span>
+          </button>
+          <button class="btn btn-primary btn-sm" @click="openCreateModal">
+            <span>➕</span>
+            <span v-if="!sidebarCollapsed">New</span>
+          </button>
+          <div class="session-count" v-if="!sidebarCollapsed">
+            {{ sessionsStore.sessions.length }} Session{{ sessionsStore.sessions.length !== 1 ? 's' : '' }}
           </div>
         </div>
-        <button class="sidebar-toggle" @click="toggleSidebar" :title="sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'">
-          <span v-if="sidebarCollapsed">▶</span>
-          <span v-else>◀</span>
-        </button>
       </div>
+      <div class="header-right">
+        <button class="btn btn-secondary btn-sm" @click="testTauriConnection">
+          Test
+        </button>
+        <button class="btn btn-primary btn-sm" @click="openSettings">
+          Settings
+        </button>
+        <div class="keyboard-hint">
+          <span>⚡ Ctrl+Shift+P</span>
+        </div>
+      </div>
+    </div>
 
+    <!-- Main Body Container -->
+    <div class="session-manager-body">
+      <!-- Sidebar for Sessions -->
+      <div class="sidebar" :class="{ 'collapsed': sidebarCollapsed }">
       <div class="sidebar-content" v-if="!sidebarCollapsed">
         <div class="sidebar-actions">
           <div class="search-box">
@@ -337,11 +412,6 @@ onUnmounted(() => {
             />
             <span class="search-icon">🔍</span>
           </div>
-          
-          <button class="btn btn-primary btn-full" @click="openCreateModal">
-            <span>➕</span>
-            New Session
-          </button>
         </div>
 
         <div class="sessions-list" v-if="filteredSessions.length > 0">
@@ -440,24 +510,25 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Main Content Area -->
-    <div class="main-content">
-      <div class="main-header">
-        <div class="main-title">
-          <h2 v-if="sessionsStore.activeSessions.length === 0">Welcome to TermNest</h2>
-          <h2 v-else>{{ sessionsStore.activeSessions.length }} Active Session{{ sessionsStore.activeSessions.length !== 1 ? 's' : '' }}</h2>
+      <!-- Main Content Area -->
+      <div class="main-content">
+        <div class="main-header">
+          <div class="main-title">
+            <h2 v-if="sessionsStore.activeSessions.length === 0">Welcome to TermNest</h2>
+            <h2 v-else>{{ sessionsStore.activeSessions.length }} Active Session{{ sessionsStore.activeSessions.length !== 1 ? 's' : '' }}</h2>
+          </div>
+          <div class="main-actions">
+            <button 
+              class="quick-actions-btn" 
+              @click="showQuickActions = !showQuickActions"
+              :title="'Quick Actions (Ctrl+Shift+P)'"
+            >
+              ⚡
+            </button>
+          </div>
         </div>
-        <div class="main-actions">
-          <button 
-            class="quick-actions-btn" 
-            @click="showQuickActions = !showQuickActions"
-            :title="'Quick Actions (Ctrl+Shift+P)'"
-          >
-            ⚡
-          </button>
-        </div>
+        <TabsContainer @create-session="openCreateModal" />
       </div>
-      <TabsContainer @create-session="openCreateModal" />
     </div>
 
     <!-- Modals -->
@@ -507,10 +578,102 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* Unified Header Styles */
+.unified-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  min-height: 50px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-title {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.title-icon {
+  font-size: 1.25rem;
+}
+
+.session-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.session-count {
+  background: var(--text-accent);
+  color: white;
+  padding: 0.1875rem 0.375rem;
+  border-radius: 8px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.keyboard-hint {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  padding: 0.25rem 0.375rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  border-radius: 4px;
+}
+
+.sidebar-toggle {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.25rem 0.375rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg-primary);
+}
+
+/* Session Manager Layout */
 .session-manager {
   height: 100%;
   display: flex;
+  flex-direction: column;
   background: var(--bg-primary);
+  overflow: hidden;
+}
+
+/* Layout container for sidebar and main content */
+.session-manager-body {
+  flex: 1;
+  display: flex;
   overflow: hidden;
 }
 
@@ -529,55 +692,6 @@ onUnmounted(() => {
   width: 60px;
 }
 
-.sidebar-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem;
-  border-bottom: 1px solid var(--border-color);
-  min-height: 60px;
-}
-
-.sidebar-title {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.sidebar-title h2 {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.session-count {
-  background: var(--text-accent);
-  color: white;
-  padding: 0.25rem 0.5rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  min-width: 20px;
-  text-align: center;
-}
-
-.sidebar-toggle {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 6px;
-  transition: all 0.2s ease;
-  font-size: 0.875rem;
-}
-
-.sidebar-toggle:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
-
 .sidebar-content {
   flex: 1;
   display: flex;
@@ -592,18 +706,18 @@ onUnmounted(() => {
 
 .search-box {
   position: relative;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem; /* Reduced from 1rem */
 }
 
 .search-input {
   width: 100%;
-  padding: 0.75rem 1rem;
-  padding-right: 2.5rem;
+  padding: 0.5rem 0.75rem; /* Reduced from 0.75rem 1rem */
+  padding-right: 2rem; /* Reduced from 2.5rem */
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: 6px; /* Reduced from 8px */
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 0.875rem;
+  font-size: 0.8125rem; /* Reduced from 0.875rem */
   transition: all 0.2s ease;
 }
 
@@ -619,7 +733,7 @@ onUnmounted(() => {
 
 .search-icon {
   position: absolute;
-  right: 1rem;
+  right: 0.75rem; /* Reduced from 1rem */
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-secondary);
@@ -630,11 +744,11 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
+  gap: 0.375rem; /* Reduced from 0.5rem */
+  padding: 0.5rem 0.75rem; /* Reduced from 0.75rem 1rem */
   border: none;
-  border-radius: 8px;
-  font-size: 0.875rem;
+  border-radius: 6px; /* Reduced from 8px */
+  font-size: 0.8125rem; /* Reduced from 0.875rem */
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -658,17 +772,17 @@ onUnmounted(() => {
 .sessions-list {
   flex: 1;
   overflow-y: auto;
-  padding: 0.5rem 0;
+  padding: 0.375rem 0; /* Reduced from 0.5rem 0 */
 }
 
 .session-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
+  gap: 0.5rem; /* Reduced from 0.75rem */
+  padding: 0.5rem 0.75rem; /* Reduced from 0.75rem 1rem */
   cursor: pointer;
   transition: all 0.2s ease;
-  border-left: 3px solid transparent;
+  border-left: 2px solid transparent; /* Reduced from 3px */
 }
 
 .session-item:hover {
@@ -685,8 +799,8 @@ onUnmounted(() => {
 }
 
 .session-status .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px; /* Reduced from 8px */
+  height: 6px; /* Reduced from 8px */
   border-radius: 50%;
   background: var(--text-secondary);
   transition: all 0.2s ease;
@@ -694,7 +808,7 @@ onUnmounted(() => {
 
 .session-status .status-dot.connected {
   background: #28a745 !important;
-  box-shadow: 0 0 6px rgba(40, 167, 69, 0.5);
+  box-shadow: 0 0 4px rgba(40, 167, 69, 0.5); /* Reduced from 6px */
 }
 
 .session-status .status-dot.connecting {
@@ -722,29 +836,29 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.1875rem; /* Reduced from 0.25rem */
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem; /* Reduced from 0.5rem */
 }
 
 .connection-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
-  height: 20px;
+  min-width: 18px; /* Reduced from 20px */
+  height: 18px; /* Reduced from 20px */
   background: var(--text-accent);
   color: white;
-  font-size: 0.75rem;
+  font-size: 0.6875rem; /* Reduced from 0.75rem */
   font-weight: 600;
-  border-radius: 10px;
-  padding: 0 0.25rem;
+  border-radius: 8px; /* Reduced from 10px */
+  padding: 0 0.1875rem; /* Reduced from 0 0.25rem */
   line-height: 1;
 }
 
 .session-details {
-  font-size: 0.75rem;
+  font-size: 0.6875rem; /* Reduced from 0.75rem */
   color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
@@ -758,10 +872,10 @@ onUnmounted(() => {
 }
 
 .session-protocol {
-  padding: 0.25rem 0.5rem;
+  padding: 0.1875rem 0.375rem; /* Reduced from 0.25rem 0.5rem */
   background: var(--bg-primary);
-  border-radius: 4px;
-  font-size: 0.75rem;
+  border-radius: 3px; /* Reduced from 4px */
+  font-size: 0.6875rem; /* Reduced from 0.75rem */
   color: var(--text-secondary);
   font-weight: 500;
   border: 1px solid var(--border-color);
@@ -1043,6 +1157,49 @@ onUnmounted(() => {
   background: var(--text-accent);
   color: white;
   transform: scale(1.05);
+}
+
+/* Custom Scrollbars for Session Manager */
+:deep(*) {
+  scrollbar-width: thin;
+  scrollbar-color: #555 #2d2d2d;
+}
+
+:deep(*::-webkit-scrollbar) {
+  width: 8px;
+  height: 8px;
+}
+
+:deep(*::-webkit-scrollbar-track) {
+  background: #2d2d2d;
+  border-radius: 4px;
+}
+
+:deep(*::-webkit-scrollbar-thumb) {
+  background: #555;
+  border-radius: 4px;
+  border: 1px solid #2d2d2d;
+}
+
+:deep(*::-webkit-scrollbar-thumb:hover) {
+  background: #666;
+}
+
+:deep(*::-webkit-scrollbar-thumb:active) {
+  background: #777;
+}
+
+:deep(*::-webkit-scrollbar-corner) {
+  background: #2d2d2d;
+}
+
+/* Sessions list specific scrollbar */
+.sessions-list :deep(*::-webkit-scrollbar-thumb) {
+  background: #404040;
+}
+
+.sessions-list :deep(*::-webkit-scrollbar-thumb:hover) {
+  background: #505050;
 }
 
 /* Responsive design */

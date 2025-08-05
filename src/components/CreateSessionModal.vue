@@ -378,12 +378,12 @@ function handleOverlayClick(event: MouseEvent) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem 1.5rem 0;
-  margin-bottom: 1.5rem;
+  padding: 1rem 1rem 0; /* Reduced from 1.5rem 1.5rem 0 */
+  margin-bottom: 1rem; /* Reduced from 1.5rem */
 }
 
 .modal-title {
-  font-size: 1.25rem;
+  font-size: 1.125rem; /* Reduced from 1.25rem */
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -391,11 +391,11 @@ function handleOverlayClick(event: MouseEvent) {
 .modal-close {
   background: none;
   border: none;
-  font-size: 1.25rem;
+  font-size: 1.125rem; /* Reduced from 1.25rem */
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 0.25rem;
-  border-radius: 0.25rem;
+  padding: 0.1875rem; /* Reduced from 0.25rem */
+  border-radius: 0.1875rem; /* Reduced from 0.25rem */
   transition: all 0.2s ease;
 }
 
@@ -405,7 +405,7 @@ function handleOverlayClick(event: MouseEvent) {
 }
 
 .modal-form {
-  padding: 0 1.5rem 1.5rem;
+  padding: 0 1rem 1rem; /* Reduced from 0 1.5rem 1.5rem */
 }
 
 .form-group {
@@ -428,12 +428,12 @@ function handleOverlayClick(event: MouseEvent) {
 .form-input,
 .form-select {
   width: 100%;
-  padding: 0.75rem;
+  padding: 0.5rem; /* Reduced from 0.75rem */
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: 0.25rem; /* Reduced from 0.375rem */
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-size: 0.875rem;
+  font-size: 0.8125rem; /* Reduced from 0.875rem */
   transition: border-color 0.2s ease;
 }
 
@@ -449,19 +449,19 @@ function handleOverlayClick(event: MouseEvent) {
 
 .form-error {
   color: #dc3545;
-  font-size: 0.75rem;
-  margin-top: 0.25rem;
+  font-size: 0.6875rem; /* Reduced from 0.75rem */
+  margin-top: 0.1875rem; /* Reduced from 0.25rem */
 }
 
 .form-help {
   color: var(--text-secondary);
-  font-size: 0.75rem;
-  margin-top: 0.25rem;
+  font-size: 0.6875rem; /* Reduced from 0.75rem */
+  margin-top: 0.1875rem; /* Reduced from 0.25rem */
 }
 
 .input-with-button {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.375rem; /* Reduced from 0.5rem */
 }
 
 .input-with-button .form-input {
@@ -469,12 +469,12 @@ function handleOverlayClick(event: MouseEvent) {
 }
 
 .btn-browse {
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem; /* Reduced from 0.75rem 1rem */
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 0.375rem;
+  border-radius: 0.25rem; /* Reduced from 0.375rem */
   color: var(--text-primary);
-  font-size: 0.875rem;
+  font-size: 0.8125rem; /* Reduced from 0.875rem */
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;

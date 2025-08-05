@@ -313,15 +313,8 @@ let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
 
 async function fitTerminal() {
-  if (fitAddon && terminal && terminalContainer.value) {
+  if (fitAddon && terminal) {
     try {
-      // Ensure the container is visible and has dimensions
-      const containerRect = terminalContainer.value.getBoundingClientRect()
-      if (containerRect.width === 0 || containerRect.height === 0) {
-        console.warn('Terminal container has no dimensions, deferring fit')
-        return
-      }
-      
       fitAddon.fit()
       const cols = terminal.cols
       const rows = terminal.rows
@@ -469,11 +462,6 @@ function updateConnectionProgress(status: string, message?: string) {
       status: 'connected',
       message: 'Connection established'
     })
-    
-    // Resize terminal when connection log disappears
-    setTimeout(() => {
-      fitTerminal()
-    }, 100)
   } else if (status === 'disconnected') {
     connectionStatus.value = 'disconnected'
     sessionsStore.updateConnectionStatus({
@@ -1098,14 +1086,14 @@ function disconnect() {
     message: 'Session disconnected'
   })
   
-  // Close the session and go back to sessions list
-  sessionsStore.closeSession()
+  // Close only this specific session
+  sessionsStore.closeSession(props.sessionId)
 }
 </script>
 
 <style scoped>
 .terminal-container {
-  height: 100%; /* Use full available space from parent container */
+  height: calc(100vh - 40px); /* Account for window titlebar and borders */
   display: flex;
   flex-direction: column;
   background: #1e1e1e;
@@ -1129,7 +1117,7 @@ function disconnect() {
   display: flex;
   overflow: hidden;
   min-height: 0;
-  /* Remove fixed height calculation and let flex handle it */
+  height: calc(100vh - 120px); /* Account for titlebar + header + some padding */
 }
 
 .terminal-wrapper {
@@ -1310,7 +1298,8 @@ function disconnect() {
   overflow: hidden; /* Let xterm.js handle scrolling */
   cursor: text;
   min-height: 0; /* Important for flex child */
-  /* Remove fixed height calculations - let flex layout handle sizing */
+  height: 100%; /* Ensure full height usage */
+  max-height: calc(100vh - 160px); /* Reserve space for header and controls, prevent bottom overflow */
 }
 
 .terminal-simulation {
